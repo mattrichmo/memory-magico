@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "builtAt": "2026-06-18T04:28:03.838Z",
+  "mode": "hybrid",
+  "pageCount": 8,
+  "chunkCount": 40,
+  "vectorDims": 2048,
+  "sourceRoots": [
+    "memory/wiki",
+    "memory/work"
+  ]
+}

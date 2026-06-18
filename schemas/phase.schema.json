@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://memorymagico.local/schemas/phase.schema.json",
+  "title": "MemoryMagico Phase Frontmatter",
+  "description": "Canonical markdown frontmatter for a phase page.",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["id", "kind", "title", "status", "createdAt", "updatedAt"],
+  "properties": {
+    "id": { "type": "string" },
+    "kind": { "const": "phase" },
+    "title": { "type": "string" },
+    "status": { "type": "string" },
+    "createdAt": { "type": "string" },
+    "updatedAt": { "type": "string" }
+  }
+}

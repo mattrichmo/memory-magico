@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://memorymagico.local/schemas/container.schema.json",
+  "title": "MemoryMagico Container Frontmatter",
+  "description": "Canonical markdown frontmatter for a container page.",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["id", "kind", "title", "status", "createdAt", "updatedAt"],
+  "properties": {
+    "id": { "type": "string" },
+    "kind": { "const": "container" },
+    "title": { "type": "string" },
+    "status": { "type": "string" },
+    "createdAt": { "type": "string" },
+    "updatedAt": { "type": "string" }
+  }
+}

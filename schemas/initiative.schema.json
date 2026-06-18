@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://memorymagico.local/schemas/initiative.schema.json",
+  "title": "MemoryMagico Initiative Frontmatter",
+  "description": "Canonical markdown frontmatter for an initiative page.",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["id", "kind", "title", "status", "createdAt", "updatedAt"],
+  "properties": {
+    "id": { "type": "string" },
+    "kind": { "const": "initiative" },
+    "title": { "type": "string" },
+    "status": { "type": "string" },
+    "createdAt": { "type": "string" },
+    "updatedAt": { "type": "string" }
+  }
+}

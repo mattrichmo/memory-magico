@@ -1,0 +1,65 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://memorymagico.local/schemas/raw-item.schema.json",
+  "title": "MemoryMagico Raw Item",
+  "description": "An unreconciled intake item from a user note, agent finding, export, transcript, code audit, or other raw source.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "kind",
+    "title",
+    "sourceType",
+    "status",
+    "path",
+    "createdAt",
+    "updatedAt"
+  ],
+  "properties": {
+    "id": { "type": "string", "pattern": "^raw_[a-z0-9][a-z0-9_-]*$" },
+    "kind": { "const": "raw_item" },
+    "title": { "type": "string", "minLength": 1 },
+    "summary": { "type": "string" },
+    "sourceType": {
+      "enum": ["user_note", "agent_note", "github_export", "github_comment", "terminal_output", "code_audit", "research", "document", "screenshot", "other"]
+    },
+    "status": {
+      "enum": ["unreconciled", "processing", "processed", "rejected", "duplicate", "archived"]
+    },
+    "path": { "type": "string", "pattern": "^memory/inbox/(raw|processed|rejected)/.+" },
+    "sourceUrl": { "type": "string", "format": "uri" },
+    "sourceRef": { "type": "string" },
+    "mediaType": { "type": "string" },
+    "byteSize": { "type": "integer", "minimum": 0 },
+    "source": { "type": "string" },
+    "tags": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "uniqueItems": true,
+      "default": []
+    },
+    "containerIds": {
+      "type": "array",
+      "items": { "type": "string", "pattern": "^container_[a-z0-9][a-z0-9_-]*$" },
+      "uniqueItems": true,
+      "default": []
+    },
+    "reconciledTo": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "kind"],
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "kind": { "enum": ["container", "comment", "discovery", "issue", "sprint", "phase", "task", "wiki_page", "relationship", "decision"] },
+          "path": { "type": "string" }
+        }
+      },
+      "default": []
+    },
+    "createdAt": { "type": "string", "format": "date-time" },
+    "updatedAt": { "type": "string", "format": "date-time" },
+    "processedAt": { "type": "string", "format": "date-time" }
+  }
+}

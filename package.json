@@ -1,0 +1,39 @@
+{
+  "name": "memorymagico",
+  "version": "0.1.0",
+  "type": "module",
+  "bin": {
+    "mm": "./bin/mm.mjs",
+    "memorymagico": "./bin/mm.mjs"
+  },
+  "scripts": {
+    "doctor": "node ./bin/mm.mjs doctor",
+    "index": "node ./bin/mm.mjs index rebuild",
+    "smoke": "node ./scripts/smoke-test.mjs",
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "files": [
+    "bin/",
+    "src/",
+    "schemas/",
+    "docs/internal/",
+    "README.md",
+    "CLI.md",
+    "DELIVERY.md",
+    "DESIGN_NOTES.md",
+    "IMPLEMENTATION.md",
+    "memory/AGENTS.md"
+  ],
+  "keywords": [
+    "memory",
+    "ai",
+    "agents",
+    "project-management",
+    "jsonl"
+  ],
+  "license": "MIT",
+  "description": "AI-friendly file-backed memory system for software projects."
+}

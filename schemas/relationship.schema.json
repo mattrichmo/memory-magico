@@ -1,0 +1,74 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://memorymagico.local/schemas/relationship.schema.json",
+  "title": "MemoryMagico Relationship",
+  "description": "A lightweight graph edge between memory entities, wiki pages, GitHub refs, files, or source records.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "kind",
+    "from",
+    "to",
+    "type",
+    "createdAt"
+  ],
+  "properties": {
+    "id": { "type": "string", "pattern": "^rel_[a-z0-9][a-z0-9_-]*$" },
+    "kind": { "const": "relationship" },
+    "from": { "$ref": "#/$defs/nodeRef" },
+    "to": { "$ref": "#/$defs/nodeRef" },
+    "type": {
+      "enum": [
+        "belongs_to",
+        "contains",
+        "derived_from",
+        "promoted_from",
+        "folded_into",
+        "duplicates",
+        "blocks",
+        "blocked_by",
+        "related_to",
+        "updates_memory",
+        "documents",
+        "references",
+        "contradicts",
+        "supersedes",
+        "depends_on",
+        "implemented_by",
+        "verified_by"
+      ]
+    },
+    "strength": { "enum": ["weak", "medium", "strong"], "default": "medium" },
+    "summary": { "type": "string" },
+    "evidence": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["type", "ref"],
+        "properties": {
+          "type": { "enum": ["file", "github", "wiki", "raw", "comment", "manual"] },
+          "ref": { "type": "string", "minLength": 1 },
+          "note": { "type": "string" }
+        }
+      },
+      "default": []
+    },
+    "createdAt": { "type": "string", "format": "date-time" },
+    "createdBy": { "type": "string" }
+  },
+  "$defs": {
+    "nodeRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "kind"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "kind": { "enum": ["container", "comment", "discovery", "issue", "initiative", "sprint", "phase", "task", "wiki_page", "raw_item", "file", "github_issue", "github_pr", "commit", "concept", "decision", "source"] },
+        "path": { "type": "string" },
+        "url": { "type": "string", "format": "uri" }
+      }
+    }
+  }
+}

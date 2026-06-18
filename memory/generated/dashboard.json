@@ -1,0 +1,175 @@
+{
+  "focus": {
+    "featuredSprints": [
+      {
+        "containerLabels": [],
+        "description": "",
+        "goal": "",
+        "id": "sprint_mqiarcrd_v4dhbr",
+        "issueSummaries": [],
+        "phases": [],
+        "progress": {
+          "activeCount": 0,
+          "blockedCount": 0,
+          "doneCount": 0,
+          "percent": 0,
+          "phaseCount": 0,
+          "taskCount": 1
+        },
+        "status": "planned",
+        "title": "Smoke Sprint",
+        "tone": "idle",
+        "updatedAt": "2026-06-17T16:40:14.424Z"
+      }
+    ],
+    "recentActivity": [
+      {
+        "at": "2026-06-17T16:40:18.327Z",
+        "commits": [],
+        "entityId": "task_mqiarfrs_uggdg9",
+        "entityType": "memory_event",
+        "event": "updated",
+        "note": "",
+        "status": "todo",
+        "title": "Smoke Task"
+      },
+      {
+        "at": "2026-06-17T16:40:14.424Z",
+        "commits": [],
+        "entityId": "sprint_mqiarcrd_v4dhbr",
+        "entityType": "memory_event",
+        "event": "updated",
+        "note": "",
+        "status": "planned",
+        "title": "Smoke Sprint"
+      }
+    ],
+    "recentSprints": [
+      {
+        "id": "sprint_mqiarcrd_v4dhbr",
+        "title": "Smoke Sprint",
+        "description": "",
+        "goal": "",
+        "status": "planned",
+        "tone": "idle",
+        "updatedAt": "2026-06-17T16:40:14.424Z",
+        "containerLabels": [],
+        "issueSummaries": [],
+        "progress": {
+          "taskCount": 1,
+          "phaseCount": 0,
+          "doneCount": 0,
+          "activeCount": 0,
+          "blockedCount": 0,
+          "percent": 0
+        },
+        "phases": []
+      }
+    ],
+    "sprints": [
+      {
+        "id": "sprint_mqiarcrd_v4dhbr",
+        "title": "Smoke Sprint",
+        "description": "",
+        "goal": "",
+        "status": "planned",
+        "tone": "idle",
+        "updatedAt": "2026-06-17T16:40:14.424Z",
+        "containerLabels": [],
+        "issueSummaries": [],
+        "progress": {
+          "taskCount": 1,
+          "phaseCount": 0,
+          "doneCount": 0,
+          "activeCount": 0,
+          "blockedCount": 0,
+          "percent": 0
+        },
+        "phases": []
+      }
+    ],
+    "tasks": [
+      {
+        "description": "",
+        "filesAffected": [],
+        "id": "task_mqiarfrs_uggdg9",
+        "issueIds": [],
+        "issueTitles": [],
+        "phaseId": "",
+        "phaseTitle": "",
+        "sprintId": "sprint_mqiarcrd_v4dhbr",
+        "sprintTitle": "Smoke Sprint",
+        "status": "todo",
+        "title": "Smoke Task",
+        "tone": "idle",
+        "updatedAt": "2026-06-17T16:40:18.327Z"
+      }
+    ]
+  },
+  "generatedAt": "2026-06-17T20:57:14.813Z",
+  "indices": {
+    "sprintSummaryCount": 0,
+    "taskSummaryCount": 0
+  },
+  "summary": {
+    "comments": {
+      "total": 0
+    },
+    "containers": {
+      "byStatus": {},
+      "total": 0
+    },
+    "discoveries": {
+      "byStatus": {},
+      "pending": 0,
+      "promoted": 0,
+      "recent": [],
+      "total": 0
+    },
+    "issues": {
+      "bySeverity": {},
+      "byStatus": {},
+      "open": 0,
+      "total": 0
+    },
+    "phases": {
+      "active": 0,
+      "completed": 0,
+      "total": 0
+    },
+    "raw": {
+      "processed": 0,
+      "recent": [],
+      "rejected": 0,
+      "total": 0,
+      "unresolved": 0
+    },
+    "relationships": {
+      "total": 2
+    },
+    "search": {
+      "builtAt": "2026-06-17T20:49:55.521Z",
+      "chunks": 40,
+      "indexed": true,
+      "mode": "hybrid",
+      "pages": 8,
+      "ready": true,
+      "vectorDims": 2048
+    },
+    "sprints": {
+      "active": 0,
+      "completed": 0,
+      "planned": 1,
+      "total": 1
+    },
+    "tasks": {
+      "blocked": 0,
+      "done": 0,
+      "inProgress": 0,
+      "total": 1
+    },
+    "wiki": {
+      "pages": 3
+    }
+  }
+}

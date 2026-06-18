@@ -1,0 +1,327 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MemoryMagico Control Surface</title>
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <a class="skip-link" href="#mainContent">Skip to content</a>
+
+  <div class="app-shell" data-app-shell>
+    <aside class="sidebar" aria-label="Primary navigation">
+      <div class="brand">
+        <div class="brand-mark" aria-hidden="true"><span></span></div>
+        <div class="brand-text">
+          <strong>MemoryMagico</strong>
+          <span>Agentic memory control</span>
+        </div>
+      </div>
+
+      <nav class="nav-list" aria-label="Dashboard views">
+        <a class="nav-link is-active" href="#overview" data-route="overview">
+          <span class="nav-icon" aria-hidden="true">⌂</span>
+          <span class="nav-label">Overview</span>
+          <span class="nav-count" id="navCountOverview">—</span>
+        </a>
+        <a class="nav-link" href="#sprints" data-route="sprints">
+          <span class="nav-icon" aria-hidden="true">S</span>
+          <span class="nav-label">Sprints</span>
+          <span class="nav-count" id="navCountSprints">0</span>
+        </a>
+        <a class="nav-link" href="#tasks" data-route="tasks">
+          <span class="nav-icon" aria-hidden="true">T</span>
+          <span class="nav-label">Tasks</span>
+          <span class="nav-count" id="navCountTasks">0</span>
+        </a>
+        <a class="nav-link" href="#issues" data-route="issues">
+          <span class="nav-icon" aria-hidden="true">!</span>
+          <span class="nav-label">Issues</span>
+          <span class="nav-count" id="navCountIssues">0</span>
+        </a>
+        <a class="nav-link" href="#inbox" data-route="inbox">
+          <span class="nav-icon" aria-hidden="true">I</span>
+          <span class="nav-label">Inbox</span>
+          <span class="nav-count" id="navCountInbox">0</span>
+        </a>
+        <a class="nav-link" href="#discoveries" data-route="discoveries">
+          <span class="nav-icon" aria-hidden="true">D</span>
+          <span class="nav-label">Discoveries</span>
+          <span class="nav-count" id="navCountDiscoveries">0</span>
+        </a>
+        <a class="nav-link" href="#activity" data-route="activity">
+          <span class="nav-icon" aria-hidden="true">A</span>
+          <span class="nav-label">Activity</span>
+          <span class="nav-count" id="navCountActivity">0</span>
+        </a>
+        <a class="nav-link" href="#system" data-route="system">
+          <span class="nav-icon" aria-hidden="true">⚙</span>
+          <span class="nav-label">System</span>
+          <span class="nav-count" id="navCountSystem">API</span>
+        </a>
+      </nav>
+
+      <div class="sidebar-footer">
+        <div class="status-card" id="railStatusCard">
+          <span class="status-dot" aria-hidden="true"></span>
+          <div>
+            <strong id="railStatusLabel">Connecting</strong>
+            <span id="railStatusCopy">Waiting for dashboard API.</span>
+          </div>
+        </div>
+      </div>
+    </aside>
+
+    <div class="mobile-topbar">
+      <button class="ghost-button" id="mobileNavButton" type="button" aria-controls="mobileNav" aria-expanded="false">Views</button>
+      <strong>MemoryMagico</strong>
+      <button class="ghost-button" id="mobileRefreshButton" type="button">Refresh</button>
+    </div>
+
+    <main class="main" id="mainContent" tabindex="-1">
+      <header class="app-header">
+        <div class="view-heading">
+          <div class="breadcrumb"><span>memorymagico</span><span>dashboard</span><span id="headerCrumb">Overview</span></div>
+          <h1 id="viewTitle">Overview</h1>
+          <p id="viewSubtitle">Wiki pages, work items, raw intake, search health, and recent memory activity.</p>
+        </div>
+
+        <div class="header-controls">
+          <label class="search-control" for="dashboardSearch">
+            <span aria-hidden="true">⌕</span>
+            <input id="dashboardSearch" type="search" placeholder="Search current view…" autocomplete="off">
+          </label>
+          <label class="toggle-control">
+            <input id="autoRefreshToggle" type="checkbox" checked>
+            <span>Auto</span>
+          </label>
+          <button class="primary-button" id="refreshButton" type="button">Refresh</button>
+        </div>
+      </header>
+
+      <section class="mode-notice" id="modeNotice" hidden></section>
+
+      <section class="summary-strip" id="summaryCards" aria-label="Memory summary"></section>
+
+      <section class="view is-active" id="view-overview" data-view="overview" aria-labelledby="overviewTitle">
+        <div class="view-grid overview-grid">
+          <section class="panel priority-panel">
+            <div class="panel-header">
+              <div>
+                <p class="kicker">Needs attention</p>
+                <h2 id="overviewTitle">Priority queue</h2>
+              </div>
+              <span class="panel-meta" id="priorityMeta">—</span>
+            </div>
+            <div class="priority-list" id="priorityList"></div>
+          </section>
+
+          <section class="panel progress-panel">
+            <div class="panel-header">
+              <div>
+                <p class="kicker">Task health</p>
+                <h2>Completion</h2>
+              </div>
+              <strong class="large-percent" id="overallCompletion">0%</strong>
+            </div>
+            <div class="progress-track large"><span id="overallCompletionBar"></span></div>
+            <div class="health-grid" id="memoryHealth"></div>
+          </section>
+
+          <section class="panel wide-panel">
+            <div class="panel-header">
+              <div>
+                <p class="kicker">Current sprints</p>
+                <h2>Sprint focus</h2>
+              </div>
+              <button class="text-button" type="button" data-route-button="sprints">View all sprints</button>
+            </div>
+            <div class="compact-table" id="overviewSprints"></div>
+          </section>
+
+          <section class="panel wide-panel">
+            <div class="panel-header">
+              <div>
+                <p class="kicker">Activity</p>
+                <h2>Recent changes</h2>
+              </div>
+              <button class="text-button" type="button" data-route-button="activity">Open activity</button>
+            </div>
+            <div class="activity-list compact" id="overviewActivity"></div>
+          </section>
+        </div>
+      </section>
+
+      <section class="view" id="view-sprints" data-view="sprints" aria-labelledby="sprintsTitle" hidden>
+        <div class="toolbar">
+          <div>
+            <h2 id="sprintsTitle">Sprints</h2>
+            <p>Sprint records with phase and task rollups. This is a work table, not a marketing surface.</p>
+          </div>
+          <div class="toolbar-controls">
+            <label>Show
+              <select id="sprintStatusFilter">
+                <option value="all">All statuses</option>
+                <option value="active">Active</option>
+                <option value="planned">Planned</option>
+                <option value="paused">Paused</option>
+                <option value="deferred">Deferred</option>
+                <option value="completed">Completed</option>
+                <option value="blocked">Blocked</option>
+              </select>
+            </label>
+            <label>Sort
+              <select id="sprintSort">
+                <option value="attention">Needs attention</option>
+                <option value="progress-desc">Progress high to low</option>
+                <option value="progress-asc">Progress low to high</option>
+                <option value="title">Title</option>
+              </select>
+            </label>
+          </div>
+        </div>
+        <div class="work-table" id="sprintTable"></div>
+      </section>
+
+      <section class="view" id="view-tasks" data-view="tasks" aria-labelledby="tasksTitle" hidden>
+        <div class="toolbar">
+          <div>
+            <h2 id="tasksTitle">Tasks</h2>
+            <p>Task state by sprint, including open, done, and blocked counts.</p>
+          </div>
+          <div class="toolbar-controls">
+            <label>Show
+              <select id="taskStatusFilter">
+                <option value="all">All task groups</option>
+                <option value="blocked">Blocked only</option>
+                <option value="open">Open only</option>
+                <option value="done">Completed only</option>
+              </select>
+            </label>
+          </div>
+        </div>
+        <div class="work-table" id="taskTable"></div>
+      </section>
+
+      <section class="view" id="view-issues" data-view="issues" aria-labelledby="issuesTitle" hidden>
+        <div class="view-grid two-column">
+          <section class="panel">
+            <div class="panel-header">
+              <div>
+                <p class="kicker">Severity</p>
+                <h2 id="issuesTitle">Issue health</h2>
+              </div>
+              <span class="panel-meta" id="issuesMeta">0 open</span>
+            </div>
+            <div class="issue-list" id="issuesPanel"></div>
+          </section>
+          <section class="panel">
+            <div class="panel-header">
+              <div>
+                <p class="kicker">Status</p>
+                <h2>Status mix</h2>
+              </div>
+            </div>
+            <div class="status-list" id="issueStatusPanel"></div>
+          </section>
+        </div>
+      </section>
+
+      <section class="view" id="view-inbox" data-view="inbox" aria-labelledby="inboxTitle" hidden>
+        <div class="view-grid two-column">
+          <section class="panel">
+            <div class="panel-header">
+              <div>
+                <p class="kicker">Memory inbox</p>
+                <h2 id="inboxTitle">Raw notes waiting for routing</h2>
+              </div>
+              <span class="panel-meta" id="rawMeta">0 total</span>
+            </div>
+            <div class="inbox-board" id="rawPanel"></div>
+          </section>
+          <section class="panel">
+            <div class="panel-header">
+              <div>
+                <p class="kicker">Routing pressure</p>
+                <h2>What to clear first</h2>
+              </div>
+            </div>
+            <div class="priority-list" id="inboxPressure"></div>
+          </section>
+        </div>
+      </section>
+
+      <section class="view" id="view-discoveries" data-view="discoveries" aria-labelledby="discoveriesTitle" hidden>
+        <div class="toolbar">
+          <div>
+            <h2 id="discoveriesTitle">Discoveries</h2>
+            <p>Evidence that has not necessarily become an issue, task, or wiki note yet.</p>
+          </div>
+        </div>
+        <div class="discovery-grid" id="discoveriesPanel"></div>
+      </section>
+
+      <section class="view" id="view-activity" data-view="activity" aria-labelledby="activityTitle" hidden>
+        <div class="toolbar">
+          <div>
+            <h2 id="activityTitle">Activity</h2>
+            <p>Recent memory events across sprint, phase, task, issue, inbox, and discovery records.</p>
+          </div>
+          <div class="toolbar-controls">
+            <label>Type
+              <select id="activityTypeFilter">
+                <option value="all">All types</option>
+              </select>
+            </label>
+          </div>
+        </div>
+        <div class="activity-list" id="activityTimeline"></div>
+      </section>
+
+      <section class="view" id="view-system" data-view="system" aria-labelledby="systemTitle" hidden>
+        <div class="view-grid two-column">
+          <section class="panel">
+            <div class="panel-header">
+              <div>
+                <p class="kicker">Connection</p>
+                <h2 id="systemTitle">Dashboard API</h2>
+              </div>
+              <span class="panel-meta" id="systemMeta">—</span>
+            </div>
+            <div class="system-list" id="systemPanel"></div>
+          </section>
+          <section class="panel">
+            <div class="panel-header">
+              <div>
+                <p class="kicker">Raw payload</p>
+                <h2>Last response</h2>
+              </div>
+            </div>
+            <pre class="json-view" id="jsonPreview">No data loaded.</pre>
+          </section>
+        </div>
+      </section>
+    </main>
+
+    <aside class="detail-drawer" id="detailDrawer" aria-hidden="true" aria-labelledby="detailTitle">
+      <div class="detail-drawer__scrim" id="detailDrawerScrim"></div>
+      <section class="detail-drawer__panel">
+        <header class="detail-drawer__header">
+          <div>
+            <p class="kicker" id="detailEyebrow">Record</p>
+            <h2 id="detailTitle">No record selected</h2>
+            <p class="detail-drawer__meta" id="detailMeta">Choose a sprint, task, or memory row to inspect.</p>
+          </div>
+          <button class="ghost-button detail-drawer__close" id="detailCloseButton" type="button" aria-label="Close details">Close</button>
+        </header>
+        <div class="detail-drawer__body" id="detailBody">
+          <div class="empty-state">Choose a sprint, task, or memory row to inspect.</div>
+        </div>
+      </section>
+    </aside>
+  </div>
+
+  <script src="./app.js" type="module"></script>
+</body>
+</html>

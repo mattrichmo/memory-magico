@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://memorymagico.local/schemas/task.schema.json",
+  "title": "MemoryMagico Task Frontmatter",
+  "description": "Canonical markdown frontmatter for a task page.",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["id", "kind", "title", "status", "createdAt", "updatedAt"],
+  "properties": {
+    "id": { "type": "string" },
+    "kind": { "const": "task" },
+    "title": { "type": "string" },
+    "status": { "type": "string" },
+    "createdAt": { "type": "string" },
+    "updatedAt": { "type": "string" }
+  }
+}
