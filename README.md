@@ -1,3 +1,5 @@
+![MemoryMagico project image](src/assets/mm-project-head.png)
+
 # MemoryMagico
 
 A local-first, Markdown-first memory harness for projects where humans and coding agents work from the same context. It gives agents a controlled path to ingest notes, reconcile them, maintain canonical project knowledge, plan and track work, log verification evidence, and pull focused context without relying on chat history.
