@@ -1,1042 +1,843 @@
-const VIEWS = {
-  overview: {
-    title: 'Overview',
-    subtitle: 'Wiki pages, work items, raw intake, search health, and recent memory activity.',
-  },
-  sprints: {
-    title: 'Sprints',
-    subtitle: 'Workstreams with phase progress, task counts, blocked work, and status.',
-  },
-  tasks: {
-    title: 'Tasks',
-    subtitle: 'Task state by sprint, including open, done, and blocked counts.',
-  },
-  issues: {
-    title: 'Issues',
-    subtitle: 'Open issue state by severity and status.',
-  },
-  inbox: {
-    title: 'Inbox',
-    subtitle: 'Raw memory notes waiting for routing, processing, or rejection.',
-  },
-  discoveries: {
-    title: 'Discoveries',
-    subtitle: 'Findings before issue promotion, wiki folding, or sprint assignment.',
-  },
-  activity: {
-    title: 'Activity',
-    subtitle: 'Recent memory events across sprint, phase, task, issue, inbox, and discovery records.',
-  },
-  system: {
-    title: 'System',
-    subtitle: 'API mode, refresh state, and the latest normalized dashboard payload.',
-  },
-};
+(() => {
+  'use strict';
 
-const els = {
-  navLinks: [...document.querySelectorAll('[data-route]')],
-  routeButtons: [...document.querySelectorAll('[data-route-button]')],
-  views: [...document.querySelectorAll('[data-view]')],
-  viewTitle: document.getElementById('viewTitle'),
-  viewSubtitle: document.getElementById('viewSubtitle'),
-  headerCrumb: document.getElementById('headerCrumb'),
-  dashboardSearch: document.getElementById('dashboardSearch'),
-  autoRefreshToggle: document.getElementById('autoRefreshToggle'),
-  refreshButton: document.getElementById('refreshButton'),
-  mobileRefreshButton: document.getElementById('mobileRefreshButton'),
-  mobileNavButton: document.getElementById('mobileNavButton'),
-  modeNotice: document.getElementById('modeNotice'),
-  railStatusCard: document.getElementById('railStatusCard'),
-  railStatusLabel: document.getElementById('railStatusLabel'),
-  railStatusCopy: document.getElementById('railStatusCopy'),
-  summaryCards: document.getElementById('summaryCards'),
-  priorityList: document.getElementById('priorityList'),
-  priorityMeta: document.getElementById('priorityMeta'),
-  overallCompletion: document.getElementById('overallCompletion'),
-  overallCompletionBar: document.getElementById('overallCompletionBar'),
-  memoryHealth: document.getElementById('memoryHealth'),
-  overviewSprints: document.getElementById('overviewSprints'),
-  overviewActivity: document.getElementById('overviewActivity'),
-  sprintTable: document.getElementById('sprintTable'),
-  sprintStatusFilter: document.getElementById('sprintStatusFilter'),
-  sprintSort: document.getElementById('sprintSort'),
-  taskTable: document.getElementById('taskTable'),
-  taskStatusFilter: document.getElementById('taskStatusFilter'),
-  issuesPanel: document.getElementById('issuesPanel'),
-  issueStatusPanel: document.getElementById('issueStatusPanel'),
-  issuesMeta: document.getElementById('issuesMeta'),
-  rawPanel: document.getElementById('rawPanel'),
-  rawMeta: document.getElementById('rawMeta'),
-  inboxPressure: document.getElementById('inboxPressure'),
-  discoveriesPanel: document.getElementById('discoveriesPanel'),
-  activityTimeline: document.getElementById('activityTimeline'),
-  activityTypeFilter: document.getElementById('activityTypeFilter'),
-  systemPanel: document.getElementById('systemPanel'),
-  systemMeta: document.getElementById('systemMeta'),
-  jsonPreview: document.getElementById('jsonPreview'),
-  detailDrawer: document.getElementById('detailDrawer'),
-  detailDrawerScrim: document.getElementById('detailDrawerScrim'),
-  detailCloseButton: document.getElementById('detailCloseButton'),
-  detailEyebrow: document.getElementById('detailEyebrow'),
-  detailTitle: document.getElementById('detailTitle'),
-  detailMeta: document.getElementById('detailMeta'),
-  detailBody: document.getElementById('detailBody'),
-  navCounts: {
-    overview: document.getElementById('navCountOverview'),
-    sprints: document.getElementById('navCountSprints'),
-    tasks: document.getElementById('navCountTasks'),
-    issues: document.getElementById('navCountIssues'),
-    inbox: document.getElementById('navCountInbox'),
-    discoveries: document.getElementById('navCountDiscoveries'),
-    activity: document.getElementById('navCountActivity'),
-    system: document.getElementById('navCountSystem'),
-  },
-};
+  const VERSION = '0.5.0-quarter-style-static';
+  const POLL_MS = 60_000;
+  const MAX_PREVIEW = 18_000;
+  const params = new URLSearchParams(window.location.search);
+  const API_BASE = (params.get('api') || '').replace(/\/$/, '');
+  const USE_FIXTURE = params.get('fixture') === '1' || localStorage.getItem('mm.dashboard.fixture') === 'true';
 
-let refreshTimer = null;
-let activeView = 'overview';
-let latestData = null;
-let latestMode = 'connecting';
-let lastError = null;
-const detailRegistry = new Map();
-let detailSequence = 0;
-
-const emptyData = {
-  generatedAt: new Date().toISOString(),
-  summary: {
-    sprints: { active: 0, planned: 0, completed: 0, total: 0 },
-    phases: { active: 0, completed: 0, total: 0 },
-    tasks: { total: 0, done: 0, blocked: 0 },
-    issues: {
-      open: 0,
-      total: 0,
-      bySeverity: {},
-      byStatus: {},
-    },
-    raw: { total: 0, unresolved: 0, processed: 0, rejected: 0 },
-    discoveries: { total: 0, pending: 0, promoted: 0 },
-    wiki: { pages: 0 },
-    search: { ready: false, pages: 0, chunks: 0, mode: 'hybrid' },
-  },
-  focus: {
-    sprints: [],
-    featuredSprints: [],
-    recentActivity: [],
-    tasks: [],
-  },
-};
-
-function apiUrl() {
-  return new URL('/api/dashboard', window.location.href).toString();
-}
-
-function escapeHtml(value) {
-  return String(value ?? '')
-    .replaceAll('&', '&amp;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;')
-    .replaceAll('"', '&quot;')
-    .replaceAll("'", '&#39;');
-}
-
-function asNumber(value) {
-  const numeric = Number(value);
-  return Number.isFinite(numeric) ? numeric : 0;
-}
-
-function clampPercent(value) {
-  return Math.max(0, Math.min(100, Math.round(asNumber(value))));
-}
-
-function humanize(value) {
-  return String(value || 'unknown')
-    .replaceAll(/[_-]+/g, ' ')
-    .replace(/\b\w/g, match => match.toUpperCase());
-}
-
-function plural(count, singular, pluralForm = `${singular}s`) {
-  return `${count} ${count === 1 ? singular : pluralForm}`;
-}
-
-function toneForCount(value, { warn = 1, danger = 4 } = {}) {
-  const count = asNumber(value);
-  if (count <= 0) return 'good';
-  if (count >= danger) return 'bad';
-  if (count >= warn) return 'warn';
-  return 'live';
-}
-
-function toneForStatus(status) {
-  const value = String(status || '').toLowerCase();
-  if (['completed', 'done', 'verified', 'closed', 'processed'].includes(value)) return 'good';
-  if (['blocked', 'rejected', 'duplicate', 'cancelled', 'failed'].includes(value)) return 'bad';
-  if (['active', 'in_progress', 'needs_review', 'needs_verification', 'promoted', 'promoted_to_issue', 'open'].includes(value)) return 'live';
-  if (['paused', 'pending', 'planned', 'deferred'].includes(value)) return 'warn';
-  return 'idle';
-}
-
-function canonicalSprintStatus(status) {
-  const value = String(status || '').toLowerCase();
-  if (['completed', 'done', 'verified', 'closed'].includes(value)) return 'completed';
-  if (['active', 'in_progress'].includes(value)) return 'active';
-  if (['planned', 'todo', 'ready_for_agent'].includes(value)) return 'planned';
-  if (['paused'].includes(value)) return 'paused';
-  if (['deferred'].includes(value)) return 'deferred';
-  if (['blocked', 'cancelled', 'rejected'].includes(value)) return 'blocked';
-  return value || 'unknown';
-}
-
-function canonicalTaskStatus(status) {
-  const value = String(status || '').toLowerCase();
-  if (['done', 'completed', 'verified', 'closed'].includes(value)) return 'done';
-  if (['blocked'].includes(value)) return 'blocked';
-  if (['in_progress', 'active'].includes(value)) return 'active';
-  return 'open';
-}
-
-function issueTone(key) {
-  const value = String(key || '').toLowerCase();
-  if (value.includes('critical') || value.includes('high') || value.includes('blocked')) return 'bad';
-  if (value.includes('low') || value.includes('closed') || value.includes('resolved')) return 'good';
-  if (value.includes('medium') || value.includes('review')) return 'warn';
-  return 'live';
-}
-
-function formatDate(value) {
-  if (!value) return 'Unknown';
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return String(value);
-  return new Intl.DateTimeFormat(undefined, {
-    month: 'short',
-    day: 'numeric',
-    hour: 'numeric',
-    minute: '2-digit',
-  }).format(date);
-}
-
-function formatTime(value) {
-  if (!value) return '—';
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return String(value);
-  return new Intl.DateTimeFormat(undefined, {
-    hour: 'numeric',
-    minute: '2-digit',
-  }).format(date);
-}
-
-function emptyState(message) {
-  return `<div class="empty-state">${escapeHtml(message)}</div>`;
-}
-
-function sprintProgress(sprint) {
-  const progress = sprint?.progress || {};
-  const taskCount = asNumber(progress.taskCount ?? sprint.taskCount ?? sprint.tasksTotal);
-  const doneCount = asNumber(progress.doneCount ?? sprint.doneCount ?? sprint.tasksDone);
-  const blockedCount = asNumber(progress.blockedCount ?? sprint.blockedCount ?? sprint.tasksBlocked);
-  const percent = progress.percent ?? sprint.progressPercent ?? (taskCount ? Math.round((doneCount / taskCount) * 100) : 0);
-  return {
-    percent: clampPercent(percent),
-    phaseCount: asNumber(progress.phaseCount ?? sprint.phaseCount),
-    taskCount,
-    doneCount,
-    blockedCount,
-    openCount: Math.max(0, taskCount - doneCount),
+  const COLORS = {
+    sky: 'sky', violet: 'violet', emerald: 'emerald', amber: 'amber', rose: 'rose', zinc: 'zinc'
   };
-}
 
-function normalizeSummary(summary = {}) {
-  return {
-    sprints: {
-      active: asNumber(summary.sprints?.active),
-      planned: asNumber(summary.sprints?.planned),
-      completed: asNumber(summary.sprints?.completed),
-      total: asNumber(summary.sprints?.total),
-    },
-    phases: {
-      active: asNumber(summary.phases?.active),
-      completed: asNumber(summary.phases?.completed),
-      total: asNumber(summary.phases?.total),
-    },
-    tasks: {
-      total: asNumber(summary.tasks?.total),
-      done: asNumber(summary.tasks?.done),
-      blocked: asNumber(summary.tasks?.blocked),
-    },
-    issues: {
-      open: asNumber(summary.issues?.open),
-      total: asNumber(summary.issues?.total),
-      bySeverity: summary.issues?.bySeverity || {},
-      byStatus: summary.issues?.byStatus || {},
-    },
-    raw: {
-      total: asNumber(summary.raw?.total),
-      unresolved: asNumber(summary.raw?.unresolved),
-      processed: asNumber(summary.raw?.processed),
-      rejected: asNumber(summary.raw?.rejected),
-    },
-    discoveries: {
-      total: asNumber(summary.discoveries?.total),
-      pending: asNumber(summary.discoveries?.pending),
-      promoted: asNumber(summary.discoveries?.promoted),
-    },
-    wiki: {
-      pages: asNumber(summary.wiki?.pages),
-    },
-    search: {
-      ready: Boolean(summary.search?.ready),
-      builtAt: summary.search?.builtAt || '',
-      pages: asNumber(summary.search?.pages),
-      chunks: asNumber(summary.search?.chunks),
-      mode: summary.search?.mode || 'hybrid',
-      vectorDims: asNumber(summary.search?.vectorDims),
-      indexed: Boolean(summary.search?.indexed),
-    },
-    comments: {
-      total: asNumber(summary.comments?.total),
-    },
-    relationships: {
-      total: asNumber(summary.relationships?.total),
-    },
-    containers: {
-      total: asNumber(summary.containers?.total),
-      byStatus: summary.containers?.byStatus || {},
-    },
+  const KIND_META = {
+    home: { label: 'Home', icon: 'home', color: 'zinc' },
+    sprint: { label: 'Sprints', icon: 'layers', color: 'sky' },
+    phase: { label: 'Phases', icon: 'listChecks', color: 'violet' },
+    task: { label: 'Tasks', icon: 'circleDot', color: 'emerald' },
+    issue: { label: 'Issues', icon: 'alertTriangle', color: 'amber' },
+    bug: { label: 'Bugs', icon: 'bug', color: 'rose' },
+    discovery: { label: 'Discoveries', icon: 'lightbulb', color: 'amber' },
+    wiki: { label: 'Wiki', icon: 'bookOpen', color: 'sky' },
+    raw: { label: 'Raw', icon: 'inbox', color: 'zinc' }
   };
-}
 
-function normalizeData(data) {
-  const summary = normalizeSummary(data?.summary || {});
-  const sprints = Array.isArray(data?.focus?.sprints) ? data.focus.sprints : [];
-  const featuredSprints = Array.isArray(data?.focus?.featuredSprints)
-    ? data.focus.featuredSprints
-    : sprints.filter(sprint => ['planned', 'active', 'paused'].includes(String(sprint.status || '').toLowerCase())).slice(0, 8);
-  const recentActivity = Array.isArray(data?.focus?.recentActivity) ? data.focus.recentActivity : [];
-  const tasks = Array.isArray(data?.focus?.tasks) ? data.focus.tasks : [];
-  return {
-    generatedAt: data?.generatedAt || new Date().toISOString(),
-    summary,
-    focus: { sprints, featuredSprints, recentActivity, tasks },
-    rawSource: data || {},
+  const ROUTES = ['home', 'sprint', 'phase', 'task', 'issue', 'bug', 'discovery', 'wiki', 'raw'];
+
+  const STATUS_COLOR = {
+    planned: 'sky', active: 'sky', paused: 'amber', completed: 'emerald', cancelled: 'zinc',
+    todo: 'zinc', in_progress: 'sky', blocked: 'rose', done: 'emerald',
+    draft: 'zinc', ready_for_agent: 'sky', needs_review: 'amber', needs_verification: 'amber', verified: 'emerald', closed: 'emerald', deferred: 'zinc',
+    P0: 'rose', P1: 'rose', P2: 'amber', P3: 'zinc', P4: 'zinc',
+    unreconciled: 'amber', processing: 'sky', processed: 'emerald', rejected: 'rose', duplicate: 'zinc', archived: 'zinc',
+    needs_research: 'amber', promoted_to_issue: 'emerald', folded_into_issue: 'emerald', resolved_by_existing_code: 'emerald',
+    fresh: 'emerald', stale: 'amber', missing: 'rose', unknown: 'zinc'
   };
-}
 
-function getTaskRows(data) {
-  const explicitTasks = data.focus.tasks;
-  if (explicitTasks.length) {
-    return explicitTasks.map((task, index) => {
-      const title = task.title || task.name || `Task ${index + 1}`;
-      const status = task.status || 'unknown';
-      const canonical = canonicalTaskStatus(status);
-      return {
-        id: task.id || `task_${index + 1}`,
-        title,
-        subtitle: task.description || task.goal || task.phaseTitle || task.sprintTitle || 'No task description recorded.',
-        status,
-        progress: clampPercent(task.progressPercent ?? (canonical === 'done' ? 100 : canonical === 'blocked' ? 0 : 15)),
-        taskCount: 1,
-        doneCount: canonical === 'done' ? 1 : 0,
-        blockedCount: canonical === 'blocked' ? 1 : 0,
-        openCount: canonical === 'done' ? 0 : 1,
-        source: task.sprintTitle || task.entityType || 'Task',
-        sprintTitle: task.sprintTitle || '',
-        phaseTitle: task.phaseTitle || '',
-        filesAffected: Array.isArray(task.filesAffected) ? task.filesAffected : [],
-        issueTitles: Array.isArray(task.issueTitles) ? task.issueTitles : [],
-        updatedAt: task.updatedAt || '',
-      };
+  const state = {
+    source: 'loading',
+    loadError: '',
+    snapshot: null,
+    data: emptyData(),
+    index: new Map(),
+    active: params.get('view') || localStorage.getItem('mm.dashboard.active') || 'home',
+    selectedKey: params.get('selected') || '',
+    history: [],
+    search: '',
+    copied: '',
+    toast: '',
+    focusSearch: false,
+    gitStatus: null,
+    endpointLog: [],
+    poll: null
+  };
+
+  const fixture = makeFixture();
+
+  function emptyData() {
+    return { sprint: [], phase: [], task: [], issue: [], bug: [], discovery: [], wiki: [], raw: [] };
+  }
+
+  function $(id) { return document.getElementById(id); }
+  function endpoint(path) { return `${API_BASE}${path}`; }
+  function esc(value) {
+    return String(value ?? '').replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
+  }
+  function attr(value) { return esc(value); }
+  function arr(value) { return Array.isArray(value) ? value : value ? [value] : []; }
+  function n(value) { return Number.isFinite(Number(value)) ? Number(value) : 0; }
+  function label(value) { return String(value ?? '').replace(/_/g, ' '); }
+  function compact(text, limit = 160) {
+    const s = String(text || '').trim();
+    return s.length > limit ? `${s.slice(0, limit - 1)}…` : s;
+  }
+  function titleOf(obj) { return obj?.title || obj?.name || obj?.summary || obj?.id || 'Untitled'; }
+  function idOf(obj) { return obj?.id || obj?.path || titleOf(obj); }
+  function keyOf(obj) { return `${obj.kind}:${idOf(obj)}`; }
+  function nowIso() { return new Date().toISOString(); }
+  function formatDate(value) {
+    if (!value) return '';
+    const d = new Date(value);
+    if (Number.isNaN(d.getTime())) return String(value);
+    return new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }).format(d);
+  }
+
+  const icons = {
+    home: '<path d="M3 11.5 12 4l9 7.5"/><path d="M5 10.5V21h5v-6h4v6h5V10.5"/>',
+    layers: '<path d="m12 3 9 4.8-9 4.8-9-4.8L12 3Z"/><path d="m3 12 9 4.8 9-4.8"/><path d="m3 16.5 9 4.5 9-4.5"/>',
+    listChecks: '<path d="m3 7 2 2 4-4"/><path d="M11 7h10"/><path d="m3 15 2 2 4-4"/><path d="M11 15h10"/>',
+    circleDot: '<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="1"/>',
+    alertTriangle: '<path d="m12 3 10 18H2L12 3Z"/><path d="M12 9v5"/><path d="M12 18h.01"/>',
+    bug: '<path d="M8 6h8"/><path d="M9 6V4"/><path d="M15 6V4"/><rect x="7" y="8" width="10" height="12" rx="5"/><path d="M3 13h4"/><path d="M17 13h4"/><path d="M4 19l4-2"/><path d="m20 19-4-2"/>',
+    lightbulb: '<path d="M9 18h6"/><path d="M10 22h4"/><path d="M8 14a6 6 0 1 1 8 0c-.8.7-1 1.4-1 2H9c0-.6-.2-1.3-1-2Z"/>',
+    bookOpen: '<path d="M2 5h7a4 4 0 0 1 4 4v12a4 4 0 0 0-4-4H2V5Z"/><path d="M22 5h-7a4 4 0 0 0-4 4v12a4 4 0 0 1 4-4h7V5Z"/>',
+    inbox: '<path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5 5h14l3 7v7a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2v-7l3-7Z"/>',
+    search: '<circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/>',
+    gitBranch: '<circle cx="6" cy="6" r="2"/><circle cx="18" cy="18" r="2"/><path d="M6 8v5a5 5 0 0 0 5 5h5"/><path d="M6 8v10"/>',
+    database: '<ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v6c0 1.7 3.6 3 8 3s8-1.3 8-3V5"/><path d="M4 11v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6"/>',
+    copy: '<rect x="9" y="9" width="11" height="11" rx="2"/><rect x="4" y="4" width="11" height="11" rx="2"/>',
+    check: '<path d="m20 6-11 11-5-5"/>',
+    chevronLeft: '<path d="m15 18-6-6 6-6"/>',
+    x: '<path d="M18 6 6 18"/><path d="m6 6 12 12"/>',
+    terminal: '<path d="m4 17 6-5-6-5"/><path d="M12 19h8"/>',
+    shield: '<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z"/><path d="M12 8v4"/><path d="M12 16h.01"/>'
+  };
+
+  function icon(name, cls = '') {
+    return `<svg class="icon ${attr(cls)}" viewBox="0 0 24 24" aria-hidden="true">${icons[name] || icons.circleDot}</svg>`;
+  }
+
+  async function readJson(path) {
+    const started = performance.now();
+    try {
+      const res = await fetch(endpoint(path), { headers: { Accept: 'application/json' }, cache: 'no-store' });
+      const ms = Math.round(performance.now() - started);
+      if (!res.ok) {
+        logEndpoint(path, false, ms, `${res.status} ${res.statusText}`);
+        return { ok: false, status: res.status, error: `${res.status} ${res.statusText}` };
+      }
+      const data = await res.json();
+      logEndpoint(path, true, ms, 'ok');
+      return { ok: true, status: res.status, data };
+    } catch (err) {
+      const ms = Math.round(performance.now() - started);
+      const error = err instanceof Error ? err.message : String(err);
+      logEndpoint(path, false, ms, error);
+      return { ok: false, status: 0, error };
+    }
+  }
+
+  function logEndpoint(path, ok, ms, note) {
+    state.endpointLog.unshift({ path, ok, ms, note, at: nowIso() });
+    state.endpointLog = state.endpointLog.slice(0, 20);
+  }
+
+  async function loadDashboard({ silent = false } = {}) {
+    if (!silent) {
+      state.source = 'loading';
+      renderBoot();
+    }
+    const result = await readJson('/api/dashboard');
+    if (result.ok && result.data) {
+      state.snapshot = result.data;
+      state.source = 'api';
+      state.loadError = '';
+      rebuildData();
+      render();
+      loadOptionalEndpoints();
+    } else if (USE_FIXTURE) {
+      state.snapshot = JSON.parse(JSON.stringify(fixture.snapshot));
+      state.source = 'fixture';
+      state.loadError = result.error || '';
+      rebuildData(fixture.optionals);
+      render();
+    } else {
+      state.snapshot = null;
+      state.source = 'unavailable';
+      state.loadError = result.error || 'Unable to load /api/dashboard';
+      render();
+    }
+  }
+
+  async function loadOptionalEndpoints() {
+    const [issues, raw, discoveries, wiki, git] = await Promise.all([
+      readJson('/api/issues'),
+      readJson('/api/raw'),
+      readJson('/api/discoveries'),
+      readJson('/api/wiki'),
+      readJson('/api/git/status')
+    ]);
+    const optionals = {};
+    if (issues.ok) optionals.issues = normalizeListResponse(issues.data, ['issues']);
+    if (raw.ok) optionals.raw = normalizeListResponse(raw.data, ['raw', 'items']);
+    if (discoveries.ok) optionals.discoveries = normalizeListResponse(discoveries.data, ['discoveries', 'items']);
+    if (wiki.ok) optionals.wiki = normalizeListResponse(wiki.data, ['wiki', 'pages', 'items']);
+    if (git.ok) state.gitStatus = git.data;
+    rebuildData(optionals);
+    render();
+  }
+
+  function normalizeListResponse(value, keys = []) {
+    if (Array.isArray(value)) return value;
+    if (!value || typeof value !== 'object') return [];
+    for (const key of [...keys, 'items', 'results', 'data']) {
+      if (Array.isArray(value[key])) return value[key];
+    }
+    return [];
+  }
+
+  function rebuildData(optionals = {}) {
+    const snapshot = state.snapshot || {};
+    const focus = snapshot.focus || {};
+    const summary = snapshot.summary || {};
+    const data = emptyData();
+
+    const sprintMap = new Map();
+    for (const source of [focus.sprints, focus.featuredSprints, focus.recentSprints]) {
+      for (const sprint of arr(source)) sprintMap.set(idOf(sprint), normalizeObject(sprint, 'sprint'));
+    }
+    data.sprint = [...sprintMap.values()];
+
+    const phaseMap = new Map();
+    const taskMap = new Map();
+    for (const sprint of data.sprint) {
+      for (const phase of arr(sprint.phases)) {
+        const normPhase = normalizeObject({ ...phase, sprintId: sprint.id || phase.sprintId, sprintTitle: sprint.title || phase.sprintTitle }, 'phase');
+        phaseMap.set(idOf(normPhase), normPhase);
+        for (const task of arr(phase.tasks)) {
+          const normTask = normalizeObject({ ...task, sprintId: sprint.id || task.sprintId, sprintTitle: sprint.title || task.sprintTitle, phaseId: normPhase.id || task.phaseId, phaseTitle: normPhase.title || task.phaseTitle }, 'task');
+          taskMap.set(idOf(normTask), normTask);
+        }
+      }
+    }
+    for (const task of arr(focus.tasks)) taskMap.set(idOf(task), normalizeObject(task, 'task'));
+    data.phase = [...phaseMap.values()];
+    data.task = [...taskMap.values()];
+
+    const issues = optionals.issues || arr(focus.issues);
+    data.issue = issues.map(x => normalizeObject(x, 'issue'));
+    data.bug = data.issue.filter(isBugIssue).map(x => normalizeObject({ ...x, kind: 'bug' }, 'bug'));
+
+    const discoveries = optionals.discoveries || arr(summary.discoveries?.recent || focus.discoveries);
+    data.discovery = discoveries.map(x => normalizeObject(x, 'discovery'));
+
+    const raw = optionals.raw || arr(summary.raw?.recent || focus.raw);
+    data.raw = raw.map(x => normalizeObject(x, 'raw'));
+
+    const wiki = optionals.wiki || arr(focus.wiki || focus.pages);
+    data.wiki = wiki.map(x => normalizeObject(x, 'wiki'));
+
+    state.data = data;
+    rebuildIndex();
+    restoreSelection();
+  }
+
+  function normalizeObject(input, kind) {
+    const obj = { ...(input || {}) };
+    obj.kind = kind;
+    obj.id ||= obj.objectId || obj.slug || obj.path || obj.title || `${kind}_${Math.random().toString(36).slice(2)}`;
+    if (kind === 'bug') obj.kind = 'bug';
+    if (kind === 'raw' && obj.kind !== 'raw') obj.kind = 'raw';
+    if (kind === 'wiki' && obj.kind !== 'wiki') obj.kind = 'wiki';
+    obj.title ||= titleOf(obj);
+    obj.status ||= obj.lifecycle || obj.ingestionStatus || obj.fixStatus || obj.freshness || '';
+    if (kind === 'task' && obj.status === 'active') obj.status = 'in_progress';
+    if (kind === 'raw' && !obj.status) obj.status = obj.processed ? 'processed' : 'unreconciled';
+    return obj;
+  }
+
+  function rebuildIndex() {
+    const index = new Map();
+    for (const kind of Object.keys(state.data)) {
+      for (const obj of state.data[kind]) index.set(keyOf(obj), obj);
+    }
+    state.index = index;
+  }
+
+  function restoreSelection() {
+    if (!state.selectedKey) return;
+    if (!state.index.has(state.selectedKey)) {
+      const id = state.selectedKey.split(':').pop();
+      const found = findById(id);
+      state.selectedKey = found ? keyOf(found) : '';
+    }
+  }
+
+  function isBugIssue(issue) {
+    return String(issue.issueType || issue.kind || '').toLowerCase() === 'bug' || String(issue.type || '').toLowerCase() === 'bug';
+  }
+
+  function renderBoot() {
+    const root = $('app');
+    root.className = 'boot-shell';
+    root.innerHTML = `<div class="boot-card"><div class="boot-title">MEMORY MAGICO</div><div class="boot-subtitle">memory cockpit</div><div class="boot-line"></div><div class="boot-status">loading dashboard snapshot...</div></div>`;
+  }
+
+  function render() {
+    const root = $('app');
+    if (!root) return;
+    root.className = '';
+    if (!state.snapshot) {
+      root.innerHTML = renderUnavailable();
+      bindPostRender();
+      return;
+    }
+    const selected = selectedObject();
+    root.innerHTML = `
+      <div class="app">
+        ${renderSidebar()}
+        <main class="main">
+          ${state.active === 'home' ? '' : renderSearchRow()}
+          <div class="content">${state.active === 'home' ? renderHome() : renderListView(state.active)}</div>
+        </main>
+        ${selected ? renderRightRail(selected) : ''}
+      </div>
+      ${state.toast ? `<div class="toast">${esc(state.toast)}</div>` : ''}
+    `;
+    bindPostRender();
+  }
+
+  function renderUnavailable() {
+    return `<div class="app"><main class="main"><div class="error-panel">
+      <h1>Dashboard API unavailable</h1>
+      <p>This static dashboard expects <code>GET /api/dashboard</code> from the local Memory Magico server.</p>
+      <p class="field-value mono">${esc(state.loadError || '')}</p>
+      <div class="error-actions">
+        <button data-action="refresh">retry</button>
+        <button data-action="fixture">load fixture</button>
+        <button data-copy="mm dashboard serve --host 127.0.0.1 --port 4317">copy serve command</button>
+      </div>
+    </div></main></div>`;
+  }
+
+  function renderSidebar() {
+    const branch = gitBranch();
+    return `<nav class="sidebar" aria-label="Primary navigation">
+      <div class="brand"><div class="brand-title">MEMORY MAGICO</div><div class="brand-subtitle">memory cockpit</div></div>
+      <div class="nav-scroll">
+        ${navButton('home')}
+        <div class="nav-separator"></div>
+        ${['sprint','phase','task','issue','bug','discovery','wiki','raw'].map(navButton).join('')}
+      </div>
+      <div class="sidebar-footer">branch: ${esc(branch)}<br/>mode: read-only<br/>v${esc(VERSION)}</div>
+    </nav>`;
+  }
+
+  function navButton(route) {
+    const meta = KIND_META[route];
+    const count = route === 'home' ? '' : state.data[route]?.length || summaryCount(route);
+    const active = state.active === route ? 'is-active' : '';
+    return `<button class="nav-button ${active}" data-route="${attr(route)}">
+      <span class="nav-label-wrap">${icon(meta.icon, state.active === route ? meta.color : '')}<span class="nav-label">${esc(meta.label)}</span></span>
+      <span class="nav-count">${count ? esc(count) : ''}</span>
+    </button>`;
+  }
+
+  function summaryCount(route) {
+    const s = state.snapshot?.summary || {};
+    if (route === 'sprint') return s.sprints?.total || 0;
+    if (route === 'phase') return s.phases?.total || 0;
+    if (route === 'task') return s.tasks?.total || 0;
+    if (route === 'issue') return s.issues?.total || 0;
+    if (route === 'bug') return s.issues?.byType?.bug || s.issues?.bugs || 0;
+    if (route === 'discovery') return s.discoveries?.total || 0;
+    if (route === 'wiki') return s.wiki?.pages || 0;
+    if (route === 'raw') return s.raw?.total || 0;
+    return 0;
+  }
+
+  function renderSearchRow() {
+    const meta = KIND_META[state.active] || KIND_META.task;
+    return `<div class="search-row">
+      ${icon('search')}
+      <input id="searchInput" class="search-input" value="${attr(state.search)}" placeholder="search ${esc(meta.label.toLowerCase())}..." autocomplete="off" />
+    </div>`;
+  }
+
+  function renderListView(kind) {
+    const meta = KIND_META[kind] || KIND_META.task;
+    const objects = filterObjects(state.data[kind] || [], state.search);
+    return `<section class="object-list">
+      <div class="list-head">
+        <div class="list-title">${icon(meta.icon, meta.color)}<h1>${esc(meta.label)}</h1><span class="count">${objects.length}</span></div>
+        <span class="readonly-pill">read-only</span>
+      </div>
+      ${objects.length ? objects.map(renderObjectCard).join('') : `<div class="empty">no ${esc(meta.label.toLowerCase())} match${state.search ? ` "${esc(state.search)}"` : ''}</div>`}
+    </section>`;
+  }
+
+  function filterObjects(objects, query) {
+    const q = String(query || '').trim().toLowerCase();
+    if (!q) return objects;
+    return objects.filter(obj => [obj.id, obj.title, obj.path, obj.status, metaLine(obj), JSON.stringify(obj.tags || [])].join(' ').toLowerCase().includes(q));
+  }
+
+  function renderObjectCard(obj) {
+    const meta = KIND_META[obj.kind] || KIND_META.task;
+    const selected = keyOf(obj) === state.selectedKey ? 'is-selected' : '';
+    return `<button class="object-card ${selected}" data-select="${attr(keyOf(obj))}">
+      <div class="object-row">
+        <div class="object-title-wrap">${icon(meta.icon, meta.color)}<span class="object-title">${esc(titleOf(obj))}</span></div>
+        <div class="object-actions">${renderTrustStrip(obj)}${obj.status ? renderStatusPill(obj.status) : ''}</div>
+      </div>
+      <span class="meta-line">${esc(metaLine(obj))}</span>
+    </button>`;
+  }
+
+  function renderHome() {
+    const all = allObjects();
+    const dirty = gitDirtyCount(all);
+    const stale = indexStaleCount(all);
+    const rawOpen = state.snapshot?.summary?.raw?.unresolved ?? state.data.raw.filter(x => ['unreconciled','processing'].includes(x.status)).length;
+    const blockers = state.data.task.filter(x => x.status === 'blocked').length + state.data.bug.filter(x => severityColor(x) === 'rose').length;
+    const cards = [
+      { label: 'git', value: dirty, unit: 'dirty objects', color: dirty ? 'rose' : 'emerald' },
+      { label: 'index', value: stale, unit: 'stale', color: stale ? 'amber' : 'emerald' },
+      { label: 'raw inbox', value: rawOpen, unit: 'unprocessed', color: rawOpen ? 'amber' : 'emerald' },
+      { label: 'blockers', value: blockers, unit: 'needs attention', color: blockers ? 'rose' : 'emerald' }
+    ];
+    const activeSprint = state.data.sprint.find(x => x.status === 'active') || state.data.sprint[0];
+    const attention = attentionQueue();
+    return `<div class="home">
+      <h1>Command Center</h1>
+      <div class="home-subtitle">What's actually true right now, not just what's stored.</div>
+      <div class="metrics">${cards.map(c => `<div class="metric-card"><div class="metric-label"><span class="dot ${attr(c.color)}"></span>${esc(c.label)}</div><div class="metric-value">${esc(c.value)}</div><div class="metric-unit">${esc(c.unit)}</div></div>`).join('')}</div>
+      ${activeSprint ? renderActiveSprint(activeSprint) : ''}
+      <div class="section-label">Attention queue (${attention.length})</div>
+      <div class="attention-list">${attention.length ? attention.map(renderAttentionRow).join('') : '<div class="empty">nothing needs attention</div>'}</div>
+    </div>`;
+  }
+
+  function renderActiveSprint(sprint) {
+    const p = sprint.progress || sprint.completion || {};
+    const done = p.doneCount ?? p.done ?? 0;
+    const total = p.taskCount ?? p.total ?? arr(sprint.taskIds).length ?? 0;
+    const blocked = p.blockedCount ?? p.blocked ?? 0;
+    const verified = p.verified ?? p.verifiedCount ?? arr(sprint.verificationEvidence).length ?? 0;
+    return `<button class="active-sprint" data-select="${attr(keyOf(sprint))}">
+      <div class="sprint-overline"><span>active sprint</span>${renderTrustStrip(sprint)}</div>
+      <div class="sprint-name">${esc(titleOf(sprint))}</div>
+      <div class="sprint-goal">${esc(compact(sprint.goal || sprint.description || metaLine(sprint), 220))}</div>
+      <div class="sprint-stats">${esc(done)}/${esc(total)} done · ${esc(blocked)} blocked · ${esc(verified)} verified</div>
+    </button>`;
+  }
+
+  function attentionQueue() {
+    const rows = [];
+    for (const t of state.data.task) {
+      if (t.status === 'blocked') rows.push({ obj: t, reason: 'blocked' });
+      else if (t.status === 'done' && !arr(t.verificationEvidence).length) rows.push({ obj: t, reason: 'done, unverified' });
+    }
+    for (const i of state.data.issue) {
+      if (['P0','P1'].includes(String(i.severity || '').toUpperCase())) rows.push({ obj: i, reason: `${i.severity} issue` });
+      else if (['needs_verification','blocked'].includes(i.status)) rows.push({ obj: i, reason: label(i.status) });
+    }
+    for (const b of state.data.bug) rows.push({ obj: b, reason: b.severity || 'bug' });
+    for (const r of state.data.raw) if (['unreconciled','processing'].includes(r.status)) rows.push({ obj: r, reason: 'raw inbox' });
+    for (const d of state.data.discovery) if (!String(d.status || '').includes('promoted')) rows.push({ obj: d, reason: d.status || 'pending' });
+    for (const o of allObjects()) if (o.index?.stale) rows.push({ obj: o, reason: 'index stale' });
+    return dedupeRows(rows).slice(0, 12);
+  }
+
+  function dedupeRows(rows) {
+    const seen = new Set();
+    return rows.filter(row => {
+      const key = keyOf(row.obj) + row.reason;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
     });
   }
 
-  return data.focus.sprints.map((sprint, index) => {
-    const progress = sprintProgress(sprint);
-    return {
-      title: sprint.title || `Sprint ${index + 1}`,
-      subtitle: sprint.goal || sprint.description || 'No sprint goal recorded.',
-      status: sprint.status || 'unknown',
-      progress: progress.percent,
-      taskCount: progress.taskCount,
-      doneCount: progress.doneCount,
-      blockedCount: progress.blockedCount,
-      openCount: progress.openCount,
-      source: 'Sprint rollup',
+  function renderAttentionRow(row) {
+    const obj = row.obj;
+    const meta = KIND_META[obj.kind] || KIND_META.task;
+    return `<button class="attention-row" data-select="${attr(keyOf(obj))}">
+      <span class="attention-left">${icon(meta.icon, meta.color)}<span class="attention-title">${esc(titleOf(obj))}</span></span>
+      <span class="attention-reason">${esc(row.reason)}</span>
+    </button>`;
+  }
+
+  function selectedObject() { return state.selectedKey ? state.index.get(state.selectedKey) : null; }
+
+  function renderRightRail(obj) {
+    const meta = KIND_META[obj.kind] || KIND_META.task;
+    return `<aside class="right-rail" aria-label="Inspector">
+      <div class="rail-top">
+        <button class="rail-button" data-action="back" ${state.history.length ? '' : 'disabled'}>${icon('chevronLeft')} back</button>
+        <button class="rail-close" data-action="close">${icon('x')}</button>
+      </div>
+      <div class="rail-head">
+        <div class="rail-head-row"><span class="kind-badge color-${attr(meta.color)}">${icon(meta.icon, meta.color)} ${esc(obj.kind)}</span>${renderTrustStrip(obj, 'lg')}</div>
+        <h2 class="rail-title">${esc(titleOf(obj))}</h2>
+        <div class="rail-status-row">${obj.status ? renderStatusPill(obj.status) : ''}${obj.priority ? `<span class="field-value mono">priority ${esc(obj.priority)}</span>` : ''}${obj.severity ? `<span class="field-value mono">severity ${esc(obj.severity)}</span>` : ''}</div>
+        ${arr(obj.tags).length ? `<div class="tag-row">${arr(obj.tags).map(t => `<span class="tag">#${esc(t)}</span>`).join('')}</div>` : ''}
+      </div>
+      <div class="rail-body">
+        ${obj.kind === 'raw' ? `<div class="raw-warning">${icon('shield')} untrusted raw input — not yet promoted</div>` : ''}
+        ${renderKindDetail(obj)}
+        ${obj.path ? renderField('path', `<div class="field-value mono">${esc(obj.path)}</div>`) : ''}
+        ${renderField('git', renderGitBlock(obj))}
+        ${obj.index !== undefined || obj.indexed !== undefined ? renderField('index', renderIndexBlock(obj.index || obj)) : ''}
+      </div>
+      <div class="rail-actions">
+        <button class="action-button" data-copy-json="${attr(keyOf(obj))}">${icon(state.copied === `json:${keyOf(obj)}` ? 'check' : 'copy')} ${state.copied === `json:${keyOf(obj)}` ? 'copied raw json' : 'copy raw json'}</button>
+        <button class="action-button secondary" data-copy="${attr(cliCommand(obj))}">${icon(state.copied === `cmd:${keyOf(obj)}` ? 'check' : 'terminal')} ${state.copied === `cmd:${keyOf(obj)}` ? 'copied command' : esc(cliCommand(obj))}</button>
+      </div>
+    </aside>`;
+  }
+
+  function renderKindDetail(obj) {
+    if (obj.kind === 'sprint') {
+      return [
+        renderField('goal', textBlock(obj.goal || obj.description)),
+        renderField('window', `<div class="field-value mono">${esc(obj.startDate || '—')} → ${esc(obj.endDate || '—')}</div>`),
+        renderField('completion', `<div class="field-value mono">${completionText(obj)}</div>`),
+        chipRow('phases', obj.phaseIds || state.data.phase.filter(x => x.sprintId === obj.id).map(x => x.id)),
+        chipRow('tasks', obj.taskIds || state.data.task.filter(x => x.sprintId === obj.id).map(x => x.id)),
+        chipRow('issues', obj.issueIds),
+        chipRow('discoveries', obj.discoveryIds)
+      ].join('');
+    }
+    if (obj.kind === 'phase') {
+      return [renderField('goal', textBlock(obj.goal || obj.description)), chipRow('sprint', obj.sprintId ? [obj.sprintId] : []), chipRow('tasks', obj.taskIds || state.data.task.filter(x => x.phaseId === obj.id).map(x => x.id)), chipRow('depends on', obj.dependsOn || obj.dependencies)].join('');
+    }
+    if (obj.kind === 'task') {
+      return [
+        renderField('summary', textBlock(obj.summary || obj.description || metaLine(obj))),
+        listField('acceptance criteria', obj.acceptanceCriteria),
+        chipRow('sprint', obj.sprintId ? [obj.sprintId] : []),
+        chipRow('phase', obj.phaseId ? [obj.phaseId] : []),
+        chipRow('blocked by', obj.blockedBy),
+        chipRow('related', obj.related || obj.issueIds),
+        listField('evidence', obj.verificationEvidence, x => typeof x === 'object' ? `${x.result || ''} ${x.type || ''}: ${x.summary || x.id || ''}` : x),
+        listField('files touched', obj.filesTouched || obj.filesAffected || obj.affectedFiles)
+      ].join('');
+    }
+    if (obj.kind === 'issue' || obj.kind === 'bug') {
+      return [
+        renderField('impact', textBlock(obj.impact || obj.summary || obj.description)),
+        obj.proposedFix ? renderField('proposed fix', textBlock(obj.proposedFix)) : '',
+        obj.verificationPlan ? renderField('verification plan', textBlock(obj.verificationPlan)) : '',
+        listField('reproduction', obj.reproductionSteps),
+        chipRow('related task', obj.relatedTask ? [obj.relatedTask] : obj.relatedTaskIds || obj.taskIds),
+        chipRow('source discoveries', obj.sourceDiscoveryIds),
+        chipRow('source raw', obj.sourceRawItemIds || obj.sourceRefs),
+        listField('files affected', obj.filesAffected || obj.affectedFiles)
+      ].join('');
+    }
+    if (obj.kind === 'discovery') {
+      return [renderField('summary', textBlock(obj.summary || obj.recommendedAction)), renderField('confidence', `<div class="field-value mono">${esc(obj.confidence || '—')}</div>`), chipRow('source', obj.sourceRawItemIds || obj.sourceRefs), chipRow('related tasks', obj.relatedTasks || obj.taskIds), chipRow('promoted to', arr(obj.promotedTo).concat(arr(obj.promotedIssueId), arr(obj.foldedIntoIssueId)).filter(Boolean)), listField('files affected', obj.filesAffected || obj.affectedFiles)].join('');
+    }
+    if (obj.kind === 'wiki') {
+      return [renderField('body', renderWikiBody(obj.body || obj.content || obj.summary || '')), chipRow('backlinks', obj.backlinks), chipRow('related tasks', obj.relatedTasks || obj.taskIds), chipRow('source refs', obj.sourceRefs), listField('semantic terms', obj.semanticTerms)].join('');
+    }
+    if (obj.kind === 'raw') {
+      return [renderField('preview', textBlock(obj.preview || obj.summary || obj.content || '')), renderField('source type', `<div class="field-value mono">${esc(obj.sourceType || '—')}</div>`), chipRow('promoted to', obj.promotedTo || obj.reconciledTo), listField('tags', obj.tags)].join('');
+    }
+    return renderField('summary', textBlock(metaLine(obj)));
+  }
+
+  function renderField(labelText, html) {
+    if (!html) return '';
+    return `<div class="field"><div class="field-label">${esc(labelText)}</div>${html}</div>`;
+  }
+  function textBlock(text) { return `<p class="field-value">${esc(text || '—')}</p>`; }
+  function listField(labelText, values, mapper = x => x) {
+    const list = arr(values).filter(Boolean);
+    if (!list.length) return renderField(`${labelText} (0)`, '<span class="field-value mono">none</span>');
+    return renderField(`${labelText} (${list.length})`, `<div class="field-value"><ul>${list.map(x => `<li>${esc(mapper(x))}</li>`).join('')}</ul></div>`);
+  }
+  function chipRow(labelText, ids) {
+    const list = arr(ids).filter(Boolean);
+    if (!list.length) return renderField(`${labelText} (0)`, '<span class="field-value mono">none</span>');
+    return renderField(`${labelText} (${list.length})`, `<div class="chip-row">${list.map(renderChip).join('')}</div>`);
+  }
+  function renderChip(id) {
+    const obj = findById(id);
+    if (!obj) return `<span class="missing-chip">${icon('x')} ${esc(id)} missing</span>`;
+    const meta = KIND_META[obj.kind] || KIND_META.task;
+    return `<button class="chip" data-select="${attr(keyOf(obj))}">${icon(meta.icon, meta.color)}<span class="chip-title">${esc(titleOf(obj))}</span></button>`;
+  }
+  function renderWikiBody(text) {
+    const source = String(text || '').trim();
+    if (!source) return '<span class="field-value mono">empty</span>';
+    const lines = source.split(/\r?\n/).slice(0, 80);
+    const html = lines.map(line => {
+      const t = line.trim();
+      if (!t) return '';
+      if (t.startsWith('## ')) return `<h3 class="field-value">${esc(t.slice(3))}</h3>`;
+      if (t.startsWith('# ')) return `<h2 class="field-value">${esc(t.slice(2))}</h2>`;
+      if (t.startsWith('- ')) return `<div class="field-value">• ${esc(t.slice(2))}</div>`;
+      return `<p class="field-value">${esc(t)}</p>`;
+    }).join('');
+    return `<div>${html}</div>`;
+  }
+
+  function renderTrustStrip(obj, size = 'sm') {
+    const signals = [gitSignal(obj), indexSignal(obj), statusSignal(obj)];
+    return `<span class="trust-strip ${size === 'lg' ? 'lg' : ''}">${signals.map(s => `<span class="dot ${attr(s.color)}" title="${attr(s.title)}"></span>`).join('')}</span>`;
+  }
+  function renderStatusPill(status) {
+    const color = STATUS_COLOR[status] || STATUS_COLOR[String(status).toUpperCase()] || 'zinc';
+    return `<span class="status-pill ${attr(color)}">${esc(label(status))}</span>`;
+  }
+  function gitSignal(obj) {
+    const git = obj.git;
+    if (git) return git.isDirty ? { color: 'rose', title: `git: dirty (${arr(git.changedFiles).length} files)` } : { color: 'emerald', title: 'git: clean' };
+    if (obj.path && dirtyFiles().some(f => f === obj.path || f.endsWith(obj.path) || obj.path.endsWith(f))) return { color: 'rose', title: 'git: dirty' };
+    return { color: 'zinc', title: 'git: unknown' };
+  }
+  function indexSignal(obj) {
+    const idx = obj.index || obj;
+    if (idx.indexed === false) return { color: 'zinc', title: 'index: not indexed' };
+    if (idx.stale) return { color: 'amber', title: 'index: stale' };
+    if (idx.indexed || idx.chunkCount || idx.lastIndexedAt) return { color: 'emerald', title: 'index: fresh' };
+    return { color: 'zinc', title: 'index: unknown' };
+  }
+  function statusSignal(obj) {
+    if (obj.kind === 'bug') return { color: severityColor(obj), title: obj.severity || obj.status || 'bug' };
+    if (obj.kind === 'discovery') return { color: String(obj.confidence).toLowerCase() === 'high' || String(obj.status).includes('promoted') ? 'emerald' : 'amber', title: obj.confidence || obj.status || 'discovery' };
+    if (obj.kind === 'wiki') return { color: obj.freshness === 'fresh' ? 'emerald' : obj.freshness === 'stale' ? 'rose' : 'zinc', title: obj.freshness || 'wiki' };
+    const color = STATUS_COLOR[obj.status] || 'zinc';
+    return { color, title: obj.status || 'unknown' };
+  }
+  function severityColor(obj) {
+    const sev = String(obj.severity || obj.priority || '').toUpperCase();
+    if (['P0','P1','CRITICAL','HIGH'].includes(sev)) return 'rose';
+    if (['P2','MEDIUM'].includes(sev)) return 'amber';
+    return STATUS_COLOR[obj.status] || 'zinc';
+  }
+
+  function renderGitBlock(obj) {
+    const git = obj.git;
+    if (!git) {
+      const dirty = obj.path && dirtyFiles().some(f => f === obj.path || f.endsWith(obj.path) || obj.path.endsWith(f));
+      return `<div class="git-block"><div class="git-line">${icon('gitBranch')}<span>${esc(gitBranch())}</span><span class="dot ${dirty ? 'rose' : 'zinc'}"></span><span>${dirty ? 'dirty' : 'unknown'}</span></div></div>`;
+    }
+    return `<div class="git-block">
+      <div class="git-line">${icon('gitBranch')}<span>${esc(git.branch || gitBranch())}</span><span class="dot ${git.isDirty ? 'rose' : 'emerald'}"></span><span class="color-${git.isDirty ? 'rose' : 'emerald'}">${git.isDirty ? 'dirty' : 'clean'}</span></div>
+      ${git.lastCommit ? `<div>${esc(git.lastCommit.hash || '')} · ${esc(git.lastCommit.subject || '')} · ${esc(git.lastCommit.date || '')}</div>` : ''}
+      ${arr(git.changedFiles).length ? `<div class="file-list">${arr(git.changedFiles).map(f => `<div>${esc(f)}</div>`).join('')}</div>` : ''}
+    </div>`;
+  }
+  function renderIndexBlock(index) {
+    if (!index) return '<span class="field-value mono">not indexed</span>';
+    const stale = !!index.stale;
+    const chunks = index.chunkCount ?? index.chunks ?? 0;
+    return `<div class="index-block"><div class="index-line">${icon('database')}<span class="dot ${stale ? 'amber' : 'emerald'}"></span><span class="color-${stale ? 'amber' : 'emerald'}">${stale ? 'stale' : 'fresh'}</span><span>· ${esc(chunks)} chunks</span></div>${index.lastIndexedAt ? `<div>last indexed ${esc(index.lastIndexedAt)}</div>` : ''}</div>`;
+  }
+
+  function completionText(obj) {
+    const p = obj.progress || obj.completion || {};
+    const done = p.doneCount ?? p.done ?? 0;
+    const total = p.taskCount ?? p.total ?? arr(obj.taskIds).length ?? 0;
+    const blocked = p.blockedCount ?? p.blocked ?? 0;
+    const verified = p.verified ?? p.verifiedCount ?? 0;
+    return `${done}/${total} done · ${blocked} blocked · ${verified} verified`;
+  }
+
+  function metaLine(obj) {
+    if (!obj) return '';
+    if (obj.kind === 'sprint' || obj.kind === 'phase') return obj.goal || obj.description || obj.summary || '';
+    if (obj.kind === 'task') return obj.summary || obj.description || [obj.taskType, obj.priority ? `priority ${obj.priority}` : '', obj.sprintTitle].filter(Boolean).join(' · ');
+    if (obj.kind === 'issue') return obj.impact || obj.summary || obj.description || obj.proposedFix || '';
+    if (obj.kind === 'bug') return [obj.severity, obj.bugClass || obj.issueType, obj.summary].filter(Boolean).join(' · ');
+    if (obj.kind === 'discovery') return obj.summary || obj.recommendedAction || '';
+    if (obj.kind === 'wiki') return [obj.wikiKind, obj.freshness, arr(obj.tags).join(', ')].filter(Boolean).join(' · ');
+    if (obj.kind === 'raw') return obj.preview || obj.summary || [obj.sourceType, obj.sourceRef].filter(Boolean).join(' · ');
+    return obj.summary || obj.description || '';
+  }
+
+  function cliCommand(obj) {
+    const id = idOf(obj);
+    if (obj.kind === 'raw') return `mm raw show ${id}`;
+    if (obj.kind === 'wiki') return `mm resolve ${id} --json`;
+    if (obj.kind === 'bug') return `mm issue show ${id}`;
+    return `mm ${obj.kind} show ${id}`;
+  }
+
+  function findById(id) {
+    const needle = String(id || '');
+    for (const kind of ['sprint','phase','task','bug','issue','discovery','wiki','raw']) {
+      const found = state.data[kind].find(x => String(x.id) === needle || String(x.path) === needle || keyOf(x) === needle);
+      if (found) return found;
+    }
+    return null;
+  }
+  function allObjects() { return Object.values(state.data).flat(); }
+  function gitBranch() { return state.gitStatus?.branch || state.gitStatus?.currentBranch || 'main'; }
+  function dirtyFiles() {
+    const g = state.gitStatus || {};
+    return arr(g.dirtyFiles || g.changedFiles || g.unstaged || g.files).map(x => typeof x === 'string' ? x : x.path || x.file || '').filter(Boolean);
+  }
+  function gitDirtyCount(all = allObjects()) {
+    const files = dirtyFiles();
+    if (files.length) return files.length;
+    return all.filter(x => x.git?.isDirty).length;
+  }
+  function indexStaleCount(all = allObjects()) {
+    const objectCount = all.filter(x => x.index?.stale || x.stale).length;
+    const search = state.snapshot?.summary?.search;
+    return objectCount + (search?.stale || search?.missing ? 1 : 0);
+  }
+
+  function selectKey(key, pushHistory = true) {
+    if (!state.index.has(key)) return;
+    if (pushHistory && state.selectedKey && state.selectedKey !== key) state.history.push(state.selectedKey);
+    state.selectedKey = key;
+    const obj = state.index.get(key);
+    state.active = obj.kind;
+    state.search = '';
+    localStorage.setItem('mm.dashboard.active', state.active);
+    updateUrl();
+    render();
+  }
+  function goBack() {
+    if (!state.history.length) return;
+    const key = state.history.pop();
+    selectKey(key, false);
+  }
+  function closeRail() {
+    state.selectedKey = '';
+    state.history = [];
+    updateUrl();
+    render();
+  }
+  function setRoute(route) {
+    state.active = route;
+    state.search = '';
+    state.selectedKey = '';
+    state.history = [];
+    localStorage.setItem('mm.dashboard.active', route);
+    updateUrl();
+    render();
+  }
+  function updateUrl() {
+    const url = new URL(window.location.href);
+    url.searchParams.set('view', state.active);
+    if (state.selectedKey) url.searchParams.set('selected', state.selectedKey);
+    else url.searchParams.delete('selected');
+    if (USE_FIXTURE) url.searchParams.set('fixture', '1');
+    history.replaceState(null, '', url);
+  }
+
+  function copyText(text, note = 'copied') {
+    const done = () => {
+      state.toast = note;
+      render();
+      setTimeout(() => { state.toast = ''; render(); }, 1200);
     };
-  });
-}
-
-function setMode(mode, copy, error = null) {
-  latestMode = mode;
-  lastError = error;
-  els.railStatusCard.classList.remove('is-live', 'is-demo', 'is-error');
-  if (mode === 'live') {
-    els.railStatusCard.classList.add('is-live');
-    els.railStatusLabel.textContent = 'Live';
-    els.railStatusCopy.textContent = copy || 'Connected to dashboard API.';
-    els.modeNotice.hidden = true;
-    els.modeNotice.innerHTML = '';
-    return;
+    if (navigator.clipboard?.writeText) navigator.clipboard.writeText(text).then(done).catch(() => fallbackCopy(text, done));
+    else fallbackCopy(text, done);
   }
-  if (mode === 'error') {
-    els.railStatusCard.classList.add('is-error');
-    els.railStatusLabel.textContent = 'API error';
-    els.railStatusCopy.textContent = copy || 'Live fetch failed.';
-    els.modeNotice.hidden = false;
-    els.modeNotice.innerHTML = `<strong>Live data failed to load.</strong> ${escapeHtml(copy || 'The dashboard is showing the last safe state or demo data.')} `;
-    return;
-  }
-  els.railStatusLabel.textContent = 'Connecting';
-  els.railStatusCopy.textContent = copy || 'Waiting for dashboard API.';
-}
-
-function routeTo(route, { updateHash = true } = {}) {
-  const next = VIEWS[route] ? route : 'overview';
-  activeView = next;
-  closeDetail();
-
-  els.views.forEach(view => {
-    const isActive = view.dataset.view === next;
-    view.hidden = !isActive;
-    view.classList.toggle('is-active', isActive);
-  });
-
-  els.navLinks.forEach(link => {
-    const isActive = link.dataset.route === next;
-    link.classList.toggle('is-active', isActive);
-    if (isActive) link.setAttribute('aria-current', 'page');
-    else link.removeAttribute('aria-current');
-  });
-
-  els.viewTitle.textContent = VIEWS[next].title;
-  els.viewSubtitle.textContent = VIEWS[next].subtitle;
-  els.headerCrumb.textContent = VIEWS[next].title;
-  els.dashboardSearch.value = '';
-  applySearch();
-
-  if (updateHash && window.location.hash !== `#${next}`) {
-    history.pushState(null, '', `#${next}`);
-  }
-  document.body.classList.remove('nav-open');
-  els.mobileNavButton?.setAttribute('aria-expanded', 'false');
-}
-
-function renderSummary(data) {
-  const summary = data.summary;
-  const openTasks = Math.max(0, summary.tasks.total - summary.tasks.done);
-  const cards = [
-    { label: 'Sprints', value: summary.sprints.active, detail: `${summary.sprints.planned} planned · ${summary.sprints.total} total`, route: 'sprints' },
-    { label: 'Tasks open', value: openTasks, detail: `${summary.tasks.done} done · ${summary.tasks.blocked} blocked`, route: 'tasks' },
-    { label: 'Wiki pages', value: summary.wiki.pages, detail: 'Canonical pages and notes', route: 'overview' },
-    { label: 'Search ready', value: summary.search.ready ? 'Yes' : 'No', detail: `${summary.search.pages || 0} pages indexed`, route: 'system' },
-    { label: 'Inbox waiting', value: summary.raw.unresolved, detail: `${summary.raw.total} raw records`, route: 'inbox' },
-    { label: 'Discoveries', value: summary.discoveries.pending, detail: `${summary.discoveries.promoted} promoted`, route: 'discoveries' },
-    { label: 'Activity', value: data.focus.recentActivity.length, detail: `Last refresh ${formatDate(data.generatedAt)}`, route: 'activity' },
-  ];
-
-  els.summaryCards.innerHTML = cards.map(card => `
-    <article class="metric-card is-clickable" role="button" tabindex="0" data-route-button="${escapeHtml(card.route)}" data-search-text="${escapeHtml(`${card.label} ${card.value} ${card.detail}`)}">
-      <div class="metric-label">${escapeHtml(card.label)}</div>
-      <div class="metric-value">${escapeHtml(card.value)}</div>
-      <p class="metric-detail">${escapeHtml(card.detail)}</p>
-    </article>
-  `).join('');
-
-  els.navCounts.overview.textContent = 'Live';
-  els.navCounts.sprints.textContent = summary.sprints.total;
-  els.navCounts.tasks.textContent = openTasks;
-  els.navCounts.issues.textContent = summary.issues.open;
-  els.navCounts.inbox.textContent = summary.raw.unresolved;
-  els.navCounts.discoveries.textContent = summary.discoveries.pending;
-  els.navCounts.activity.textContent = data.focus.recentActivity.length;
-  els.navCounts.system.textContent = latestMode === 'live' ? 'Live' : latestMode === 'demo' ? 'Demo' : 'API';
-
-  const completion = summary.tasks.total ? Math.round((summary.tasks.done / summary.tasks.total) * 100) : 0;
-  els.overallCompletion.textContent = `${completion}%`;
-  els.overallCompletionBar.style.width = `${clampPercent(completion)}%`;
-
-  const health = [
-    { label: 'Blocked tasks', value: summary.tasks.blocked ? `${summary.tasks.blocked}` : 'Clear', copy: summary.tasks.blocked ? 'Blocked work should be handled before more scope gets added.' : 'No blocked task pressure in the summary.', tone: toneForCount(summary.tasks.blocked, { warn: 1, danger: 4 }) },
-    { label: 'Raw inbox', value: summary.raw.unresolved ? `${summary.raw.unresolved}` : 'Clear', copy: summary.raw.unresolved ? 'Unrouted memory can turn into duplicate or stale work.' : 'No raw source material is waiting.', tone: toneForCount(summary.raw.unresolved, { warn: 1, danger: 8 }) },
-    { label: 'Wiki pages', value: summary.wiki.pages ? `${summary.wiki.pages}` : 'Empty', copy: summary.wiki.pages ? 'Canonical pages are available for search and linking.' : 'No wiki pages have been created yet.', tone: toneForCount(summary.wiki.pages, { warn: 1, danger: 6 }) },
-    { label: 'Search index', value: summary.search.ready ? 'Ready' : 'Missing', copy: summary.search.ready ? `${summary.search.pages || 0} pages and ${summary.search.chunks || 0} chunks indexed.` : 'Search artifacts need to be rebuilt.', tone: summary.search.ready ? 'good' : 'bad' },
-  ];
-
-  els.memoryHealth.innerHTML = health.map(item => `
-    <article class="health-item" data-search-text="${escapeHtml(`${item.label} ${item.value} ${item.copy}`)}">
-      <div class="health-top">
-        <span class="mini-label">${escapeHtml(item.label)}</span>
-        <strong class="status-badge tone-${escapeHtml(item.tone)}">${escapeHtml(item.value)}</strong>
-      </div>
-      <span class="health-copy">${escapeHtml(item.copy)}</span>
-    </article>
-  `).join('');
-}
-
-function priorityItems(summary) {
-  return [
-    {
-      label: 'Blocked tasks',
-      value: summary.tasks.blocked,
-      copy: summary.tasks.blocked ? 'Resolve blockers before trusting sprint progress.' : 'No blocked task pressure.',
-      route: 'tasks',
-      tone: toneForCount(summary.tasks.blocked, { warn: 1, danger: 4 }),
-    },
-    {
-      label: 'Unreconciled inbox',
-      value: summary.raw.unresolved,
-      copy: summary.raw.unresolved ? 'Route raw notes into issues, tasks, wiki, or rejection.' : 'Inbox is clear.',
-      route: 'inbox',
-      tone: toneForCount(summary.raw.unresolved, { warn: 1, danger: 8 }),
-    },
-    {
-      label: 'Open issues',
-      value: summary.issues.open,
-      copy: summary.issues.open ? 'Triage issue severity and assign to sprint work.' : 'Issue queue is clear.',
-      route: 'issues',
-      tone: toneForCount(summary.issues.open, { warn: 1, danger: 12 }),
-    },
-    {
-      label: 'Pending discoveries',
-      value: summary.discoveries.pending,
-      copy: summary.discoveries.pending ? 'Promote useful findings or fold them into docs.' : 'No pending discovery backlog.',
-      route: 'discoveries',
-      tone: toneForCount(summary.discoveries.pending, { warn: 2, danger: 10 }),
-    },
-  ].sort((a, b) => asNumber(b.value) - asNumber(a.value));
-}
-
-function registerDetail(record) {
-  const key = `detail_${++detailSequence}`;
-  detailRegistry.set(key, record);
-  return key;
-}
-
-function renderDetailList(items, empty = 'None recorded.') {
-  if (!items || !items.length) return `<div class="detail-empty">${escapeHtml(empty)}</div>`;
-  return `<ul class="detail-list">${items.map(item => `<li>${escapeHtml(item)}</li>`).join('')}</ul>`;
-}
-
-function renderDetailSections(sections) {
-  return sections.map(section => `
-    <section class="detail-section">
-      <h3>${escapeHtml(section.title)}</h3>
-      ${section.html}
-    </section>
-  `).join('');
-}
-
-function openDetail(key) {
-  const detail = detailRegistry.get(key);
-  if (!detail) return;
-  els.detailEyebrow.textContent = detail.eyebrow || 'Record';
-  els.detailTitle.textContent = detail.title || 'Record details';
-  els.detailMeta.textContent = detail.meta || '';
-  els.detailBody.innerHTML = detail.body || '<div class="empty-state">No additional detail available.</div>';
-  els.detailDrawer.classList.add('is-open');
-  els.detailDrawer.setAttribute('aria-hidden', 'false');
-  document.body.classList.add('detail-open');
-}
-
-function closeDetail() {
-  els.detailDrawer.classList.remove('is-open');
-  els.detailDrawer.setAttribute('aria-hidden', 'true');
-  document.body.classList.remove('detail-open');
-}
-
-function renderPriority(summary, target = els.priorityList) {
-  const items = priorityItems(summary);
-  const active = items.filter(item => asNumber(item.value) > 0).length;
-  els.priorityMeta.textContent = `${active} active`;
-  target.innerHTML = items.map((item, index) => `
-    <article class="priority-row" data-route-button="${escapeHtml(item.route)}" data-search-text="${escapeHtml(`${item.label} ${item.value} ${item.copy}`)}">
-      <span class="priority-index">${String(index + 1).padStart(2, '0')}</span>
-      <div class="priority-main">
-        <strong>${escapeHtml(item.label)}</strong>
-        <span>${escapeHtml(item.copy)}</span>
-      </div>
-      <span class="priority-badge tone-${escapeHtml(item.tone)}">${escapeHtml(item.value)}</span>
-    </article>
-  `).join('');
-}
-
-function sortedSprints(data) {
-  const selected = els.sprintStatusFilter.value;
-  const sort = els.sprintSort.value;
-  const rows = data.focus.sprints.filter(sprint => {
-    if (selected === 'all') return true;
-    return canonicalSprintStatus(sprint.status) === selected;
-  });
-
-  rows.sort((a, b) => {
-    const ap = sprintProgress(a);
-    const bp = sprintProgress(b);
-    if (sort === 'progress-desc') return bp.percent - ap.percent;
-    if (sort === 'progress-asc') return ap.percent - bp.percent;
-    if (sort === 'title') return String(a.title || '').localeCompare(String(b.title || ''));
-    return (bp.blockedCount - ap.blockedCount) || (bp.openCount - ap.openCount) || (ap.percent - bp.percent);
-  });
-
-  return rows;
-}
-
-function sprintRowsMarkup(rows, { compact = false } = {}) {
-  if (!rows.length) return emptyState('No sprint records match the current filters.');
-  const header = compact
-    ? '<div class="compact-row header"><span>Sprint</span><span>Status</span><span>Progress</span><span>Blocked</span></div>'
-    : '<div class="work-row header"><span>Sprint</span><span>Status</span><span>Phases</span><span>Tasks</span><span>Blocked</span><span>Progress</span></div>';
-
-  const body = rows.map((sprint, index) => {
-    const title = sprint.title || `Sprint ${index + 1}`;
-    const goal = sprint.goal || sprint.description || 'No sprint goal recorded.';
-    const status = sprint.status || 'unknown';
-    const tone = sprint.tone || toneForStatus(status);
-    const progress = sprintProgress(sprint);
-    const phases = Array.isArray(sprint.phases) ? sprint.phases : [];
-    const detailKey = registerDetail({
-      eyebrow: 'Sprint',
-      title,
-      meta: `${humanize(status)} · ${sprint.id || 'No id'} · Updated ${formatDate(sprint.updatedAt)}`,
-      body: renderDetailSections([
-        {
-          title: 'Goal',
-          html: `<p>${escapeHtml(goal)}</p>`,
-        },
-        {
-          title: 'Progress',
-          html: `
-            <div class="detail-stats">
-              <article><span>Phases</span><strong>${escapeHtml(progress.phaseCount)}</strong></article>
-              <article><span>Tasks</span><strong>${escapeHtml(progress.taskCount)}</strong></article>
-              <article><span>Done</span><strong>${escapeHtml(progress.doneCount)}</strong></article>
-              <article><span>Blocked</span><strong>${escapeHtml(progress.blockedCount)}</strong></article>
-              <article><span>Completion</span><strong>${escapeHtml(`${progress.percent}%`)}</strong></article>
-            </div>
-          `,
-        },
-        {
-          title: 'Phases',
-          html: phases.length
-            ? phases.map(phase => `
-                <article class="detail-phase">
-                  <div class="detail-phase__head">
-                    <strong>${escapeHtml(phase.number ? `P${phase.number}. ` : '')}${escapeHtml(phase.title || phase.id)}</strong>
-                    <span class="status-badge tone-${escapeHtml(phase.tone || toneForStatus(phase.status))}">${escapeHtml(humanize(phase.status))}</span>
-                  </div>
-                  <p>${escapeHtml(`${phase.progress?.doneCount || 0}/${phase.progress?.taskCount || 0} tasks complete`)}</p>
-                  ${renderDetailList((phase.tasks || []).map(task => `${task.title} (${humanize(task.status)})`), 'No linked tasks.')}
-                </article>
-              `).join('')
-            : '<div class="detail-empty">No phases linked to this sprint.</div>',
-        },
-        {
-          title: 'CLI',
-          html: `<code>./mm sprint show ${escapeHtml(sprint.id || '')}</code>`,
-        },
-      ]),
-    });
-    if (compact) {
-      return `
-        <article class="compact-row is-clickable" role="button" tabindex="0" data-detail-key="${escapeHtml(detailKey)}" data-status="${escapeHtml(status)}" data-search-text="${escapeHtml(`${title} ${goal} ${status}`)}">
-          <div class="compact-title-cell"><strong class="compact-title">${escapeHtml(title)}</strong><span class="compact-subtitle">${escapeHtml(goal)}</span></div>
-          <span class="status-badge tone-${escapeHtml(tone)}">${escapeHtml(humanize(status))}</span>
-          <div class="progress-track"><span style="width:${progress.percent}%"></span></div>
-          <span class="number-cell">${escapeHtml(progress.blockedCount)}</span>
-        </article>
-      `;
-    }
-    return `
-      <article class="work-row is-clickable" role="button" tabindex="0" data-detail-key="${escapeHtml(detailKey)}" data-status="${escapeHtml(canonicalSprintStatus(status))}" data-search-text="${escapeHtml(`${title} ${goal} ${status} ${progress.phaseCount} ${progress.taskCount} ${progress.blockedCount}`)}">
-        <div class="work-title-cell"><strong class="work-title">${escapeHtml(title)}</strong><span class="work-subtitle">${escapeHtml(goal)}</span></div>
-        <span class="status-badge tone-${escapeHtml(tone)}">${escapeHtml(humanize(status))}</span>
-        <span class="number-cell">${escapeHtml(progress.phaseCount)}</span>
-        <span class="number-cell">${escapeHtml(progress.taskCount)}</span>
-        <span class="number-cell">${escapeHtml(progress.blockedCount)}</span>
-        <div class="progress-track" title="${progress.percent}% complete"><span style="width:${progress.percent}%"></span></div>
-      </article>
-    `;
-  }).join('');
-  return header + body;
-}
-
-function renderSprints(data) {
-  const rows = sortedSprints(data);
-  els.sprintTable.innerHTML = sprintRowsMarkup(rows);
-  els.overviewSprints.innerHTML = sprintRowsMarkup((data.focus.featuredSprints || data.focus.sprints).slice(0, 5), { compact: true });
-}
-
-function renderTasks(data) {
-  let rows = getTaskRows(data);
-  const filter = els.taskStatusFilter.value;
-  if (filter === 'blocked') rows = rows.filter(row => row.blockedCount > 0 || String(row.status).toLowerCase() === 'blocked');
-  if (filter === 'open') rows = rows.filter(row => row.openCount > 0);
-  if (filter === 'done') rows = rows.filter(row => row.doneCount >= row.taskCount && row.taskCount > 0);
-  rows.sort((a, b) => (b.blockedCount - a.blockedCount) || (b.openCount - a.openCount) || (a.progress - b.progress));
-
-  if (!rows.length) {
-    els.taskTable.innerHTML = emptyState('No task rows match the current filters.');
-    return;
+  function fallbackCopy(text, done) {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand('copy');
+    ta.remove();
+    done();
   }
 
-  const header = '<div class="work-row header"><span>Task source</span><span>Status</span><span>Open</span><span>Done</span><span>Blocked</span><span>Progress</span></div>';
-  const body = rows.map(row => {
-    const tone = row.blockedCount ? 'bad' : toneForStatus(row.status);
-    const detailKey = registerDetail({
-      eyebrow: 'Task',
-      title: row.title,
-      meta: `${humanize(row.status)} · ${row.id || 'No id'}${row.updatedAt ? ` · Updated ${formatDate(row.updatedAt)}` : ''}`,
-      body: renderDetailSections([
-        {
-          title: 'Summary',
-          html: `<p>${escapeHtml(row.subtitle)}</p>`,
-        },
-        {
-          title: 'Placement',
-          html: `
-            <div class="detail-stats">
-              <article><span>Sprint</span><strong>${escapeHtml(row.sprintTitle || row.source || 'Unassigned')}</strong></article>
-              <article><span>Phase</span><strong>${escapeHtml(row.phaseTitle || 'Unassigned')}</strong></article>
-              <article><span>Open</span><strong>${escapeHtml(row.openCount)}</strong></article>
-              <article><span>Done</span><strong>${escapeHtml(row.doneCount)}</strong></article>
-              <article><span>Blocked</span><strong>${escapeHtml(row.blockedCount)}</strong></article>
-            </div>
-          `,
-        },
-        {
-          title: 'Files affected',
-          html: renderDetailList((row.filesAffected || []).map(file => String(file)), 'No file list recorded.'),
-        },
-        {
-          title: 'Linked issues',
-          html: renderDetailList((row.issueTitles || []).map(issue => String(issue)), 'No linked issues.'),
-        },
-        {
-          title: 'CLI',
-          html: row.id ? `<code>./mm task show ${escapeHtml(row.id)}</code>` : '<div class="detail-empty">No CLI id available for this row.</div>',
-        },
-      ]),
-    });
-    return `
-      <article class="work-row is-clickable" role="button" tabindex="0" data-detail-key="${escapeHtml(detailKey)}" data-search-text="${escapeHtml(`${row.title} ${row.subtitle} ${row.status} ${row.source}`)}">
-        <div class="work-title-cell"><strong class="work-title">${escapeHtml(row.title)}</strong><span class="work-subtitle">${escapeHtml(row.subtitle)}</span></div>
-        <span class="status-badge tone-${escapeHtml(tone)}">${escapeHtml(humanize(row.status))}</span>
-        <span class="number-cell">${escapeHtml(row.openCount)}</span>
-        <span class="number-cell">${escapeHtml(row.doneCount)}</span>
-        <span class="number-cell">${escapeHtml(row.blockedCount)}</span>
-        <div class="progress-track" title="${row.progress}% complete"><span style="width:${row.progress}%"></span></div>
-      </article>
-    `;
-  }).join('');
-  els.taskTable.innerHTML = header + body;
-}
-
-function sortedEntries(record) {
-  return Object.entries(record || {})
-    .map(([key, value]) => [key, asNumber(value)])
-    .sort((a, b) => b[1] - a[1]);
-}
-
-function renderIssues(summary) {
-  const severityItems = sortedEntries(summary.issues.bySeverity);
-  const statusItems = sortedEntries(summary.issues.byStatus);
-  els.issuesMeta.textContent = `${summary.issues.open} open`;
-
-  els.issuesPanel.innerHTML = severityItems.length ? severityItems.map(([severity, count]) => {
-    const tone = issueTone(severity);
-    const detailKey = registerDetail({
-      eyebrow: 'Issue severity',
-      title: `${humanize(severity)} issues`,
-      meta: `${plural(count, 'record')} in the current dashboard payload`,
-      body: renderDetailSections([
-        { title: 'Summary', html: `<p>${escapeHtml(`${humanize(severity)} issues are currently grouped together in the dashboard severity breakdown.`)}</p>` },
-      ]),
-    });
-    return `
-      <article class="issue-row is-clickable" role="button" tabindex="0" data-detail-key="${escapeHtml(detailKey)}" data-search-text="${escapeHtml(`${severity} ${count}`)}">
-        <div class="issue-main">
-          <span class="issue-dot ${tone === 'bad' ? 'bad' : tone === 'good' ? 'good' : tone === 'live' ? 'live' : ''}" aria-hidden="true"></span>
-          <div><strong>${escapeHtml(humanize(severity))}</strong><span class="issue-subtext">${escapeHtml(tone === 'bad' ? 'Needs first look' : tone === 'good' ? 'Low pressure' : 'Needs triage')}</span></div>
-        </div>
-        <span class="issue-count">${escapeHtml(count)}</span>
-      </article>
-    `;
-  }).join('') : emptyState('No issue severity breakdown returned by the memory payload.');
-
-  const max = Math.max(...statusItems.map(([, count]) => count), 1);
-  els.issueStatusPanel.innerHTML = statusItems.length ? statusItems.map(([status, count]) => {
-    const percent = Math.round((count / max) * 100);
-    const tone = toneForStatus(status);
-    const detailKey = registerDetail({
-      eyebrow: 'Issue status',
-      title: `${humanize(status)} issues`,
-      meta: `${plural(count, 'record')} in this status bucket`,
-      body: renderDetailSections([
-        { title: 'Summary', html: `<p>${escapeHtml(`${humanize(status)} issues account for ${count} records in the latest payload.`)}</p>` },
-      ]),
-    });
-    return `
-      <article class="status-row is-clickable" role="button" tabindex="0" data-detail-key="${escapeHtml(detailKey)}" data-search-text="${escapeHtml(`${status} ${count}`)}">
-        <div><strong>${escapeHtml(humanize(status))}</strong><span class="issue-subtext">${escapeHtml(plural(count, 'record'))}</span></div>
-        <span class="status-count">${escapeHtml(count)}</span>
-        <div class="progress-track"><span class="tone-${escapeHtml(tone)}" style="width:${clampPercent(percent)}%"></span></div>
-      </article>
-    `;
-  }).join('') : emptyState('No issue status mix returned by the memory payload.');
-}
-
-function renderInbox(summary) {
-  const raw = summary.raw;
-  els.rawMeta.textContent = `${raw.total} total`;
-  const columns = [
-    { label: 'Unreconciled', value: raw.unresolved, copy: 'Needs routing into sprint, task, issue, doc, or rejection.', tone: toneForCount(raw.unresolved, { warn: 1, danger: 8 }) },
-    { label: 'Processed', value: raw.processed, copy: 'Already folded into deterministic memory records.', tone: raw.processed ? 'good' : 'idle' },
-    { label: 'Rejected', value: raw.rejected, copy: 'Rejected or intentionally ignored source material.', tone: raw.rejected ? 'warn' : 'idle' },
-  ];
-
-  els.rawPanel.innerHTML = columns.map(item => {
-    const detailKey = registerDetail({
-      eyebrow: 'Inbox bucket',
-      title: item.label,
-      meta: `${plural(item.value, 'record')} in this bucket`,
-      body: renderDetailSections([
-        { title: 'Summary', html: `<p>${escapeHtml(item.copy)}</p>` },
-      ]),
-    });
-    return `
-    <article class="inbox-column is-clickable" role="button" tabindex="0" data-detail-key="${escapeHtml(detailKey)}" data-search-text="${escapeHtml(`${item.label} ${item.value} ${item.copy}`)}">
-      <span class="mini-label">${escapeHtml(item.label)}</span>
-      <div class="inbox-value">${escapeHtml(item.value)}</div>
-      <p class="work-subtitle">${escapeHtml(item.copy)}</p>
-      <span class="status-badge tone-${escapeHtml(item.tone)}">${escapeHtml(humanize(item.tone))}</span>
-    </article>
-  `;
-  }).join('');
-
-  renderPriority(summary, els.inboxPressure);
-}
-
-function renderDiscoveries(summary) {
-  const items = [
-    { label: 'Pending', value: summary.discoveries.pending, copy: 'Still need promotion, rejection, or wiki folding.', tone: toneForCount(summary.discoveries.pending, { warn: 2, danger: 10 }) },
-    { label: 'Promoted', value: summary.discoveries.promoted, copy: 'Escalated into tracked issue or build work.', tone: summary.discoveries.promoted ? 'good' : 'idle' },
-    { label: 'Total', value: summary.discoveries.total, copy: 'Discovery records known to memory.', tone: summary.discoveries.total ? 'live' : 'idle' },
-  ];
-  els.discoveriesPanel.innerHTML = items.map(item => {
-    const detailKey = registerDetail({
-      eyebrow: 'Discovery bucket',
-      title: item.label,
-      meta: `${plural(item.value, 'record')} in this bucket`,
-      body: renderDetailSections([
-        { title: 'Summary', html: `<p>${escapeHtml(item.copy)}</p>` },
-      ]),
-    });
-    return `
-    <article class="discovery-card is-clickable" role="button" tabindex="0" data-detail-key="${escapeHtml(detailKey)}" data-search-text="${escapeHtml(`${item.label} ${item.value} ${item.copy}`)}">
-      <p class="kicker">${escapeHtml(item.label)}</p>
-      <strong>${escapeHtml(item.value)}</strong>
-      <p>${escapeHtml(item.copy)}</p>
-      <span class="status-badge tone-${escapeHtml(item.tone)}">${escapeHtml(humanize(item.tone))}</span>
-    </article>
-  `;
-  }).join('');
-}
-
-function activityRowsMarkup(events, { compact = false } = {}) {
-  if (!events.length) return emptyState('No recent memory events returned.');
-  const visible = compact ? events.slice(0, 5) : events;
-  return visible.map(event => {
-    const type = event.entityType || 'event';
-    const title = event.title || `${humanize(type)} update`;
-    const note = event.note || `${humanize(type)} ${event.entityId ? `#${event.entityId}` : ''}`.trim();
-    const status = event.status || event.event || 'unknown';
-    const tone = toneForStatus(status);
-    const detailKey = registerDetail({
-      eyebrow: 'Activity event',
-      title,
-      meta: `${humanize(type)} · ${humanize(event.event || status)} · ${formatDate(event.at)}`,
-      body: renderDetailSections([
-        { title: 'Summary', html: `<p>${escapeHtml(note)}</p>` },
-        { title: 'Status', html: `<div class="detail-stats"><article><span>Type</span><strong>${escapeHtml(humanize(type))}</strong></article><article><span>Status</span><strong>${escapeHtml(humanize(status))}</strong></article>${event.entityId ? `<article><span>Entity</span><strong>${escapeHtml(event.entityId)}</strong></article>` : ''}</div>` },
-      ]),
-    });
-    return `
-      <article class="activity-row is-clickable" role="button" tabindex="0" data-detail-key="${escapeHtml(detailKey)}" data-activity-type="${escapeHtml(String(type).toLowerCase())}" data-search-text="${escapeHtml(`${title} ${note} ${type} ${status} ${event.event}`)}">
-        <time class="activity-time" datetime="${escapeHtml(event.at || '')}">${escapeHtml(formatTime(event.at))}<br>${escapeHtml(formatDate(event.at).split(',')[0])}</time>
-        <div>
-          <strong class="activity-title">${escapeHtml(title)}</strong>
-          <span class="activity-copy">${escapeHtml(note)}</span>
-        </div>
-        <div class="activity-meta">
-          <span class="row-type">${escapeHtml(String(type).charAt(0).toUpperCase())}</span>
-          <span class="status-badge tone-${escapeHtml(tone)}">${escapeHtml(humanize(event.event || status))}</span>
-        </div>
-      </article>
-    `;
-  }).join('');
-}
-
-function renderActivity(events) {
-  const types = [...new Set(events.map(event => String(event.entityType || 'event').toLowerCase()))].sort();
-  const current = els.activityTypeFilter.value || 'all';
-  els.activityTypeFilter.innerHTML = '<option value="all">All types</option>' + types.map(type => `<option value="${escapeHtml(type)}">${escapeHtml(humanize(type))}</option>`).join('');
-  els.activityTypeFilter.value = types.includes(current) ? current : 'all';
-
-  const selectedType = els.activityTypeFilter.value;
-  const filtered = selectedType === 'all' ? events : events.filter(event => String(event.entityType || 'event').toLowerCase() === selectedType);
-  els.activityTimeline.innerHTML = activityRowsMarkup(filtered);
-  els.overviewActivity.innerHTML = activityRowsMarkup(events, { compact: true });
-}
-
-function renderSystem(data) {
-  const items = [
-    ['Mode', humanize(latestMode)],
-    ['API endpoint', '/api/dashboard'],
-    ['Last refresh', formatDate(data.generatedAt)],
-    ['Auto refresh', els.autoRefreshToggle.checked ? 'On · 15 seconds' : 'Off'],
-    ['Last error', lastError ? lastError.message : 'None'],
-  ];
-  els.systemMeta.textContent = latestMode;
-  els.systemPanel.innerHTML = items.map(([key, value]) => `
-    <article class="system-row" data-search-text="${escapeHtml(`${key} ${value}`)}">
-      <span class="system-key">${escapeHtml(key)}</span>
-      <strong class="system-value">${escapeHtml(value)}</strong>
-    </article>
-  `).join('');
-  els.jsonPreview.textContent = JSON.stringify(data.rawSource || data, null, 2);
-}
-
-function renderAll(data) {
-  latestData = data;
-  detailRegistry.clear();
-  detailSequence = 0;
-  renderSummary(data);
-  renderPriority(data.summary);
-  renderSprints(data);
-  renderTasks(data);
-  renderIssues(data.summary);
-  renderInbox(data.summary);
-  renderDiscoveries(data.summary);
-  renderActivity(data.focus.recentActivity);
-  renderSystem(data);
-  bindDynamicRouteButtons();
-  bindDetailButtons();
-  applySearch();
-}
-
-function applySearch() {
-  const query = els.dashboardSearch.value.trim().toLowerCase();
-  const active = document.querySelector(`[data-view="${activeView}"]`);
-  if (!active) return;
-  active.querySelectorAll('[data-search-text]').forEach(item => {
-    const text = item.dataset.searchText.toLowerCase();
-    item.classList.toggle('hidden-by-filter', Boolean(query) && !text.includes(query));
-  });
-}
-
-function bindDynamicRouteButtons() {
-  document.querySelectorAll('[data-route-button]').forEach(button => {
-    if (button.dataset.routeBound === 'true') return;
-    button.dataset.routeBound = 'true';
-    button.addEventListener('click', () => routeTo(button.dataset.routeButton));
-    button.addEventListener('keydown', event => {
-      if (event.key === 'Enter' || event.key === ' ') {
-        event.preventDefault();
-        routeTo(button.dataset.routeButton);
+  function bindPostRender() {
+    const search = $('searchInput');
+    if (search) {
+      search.addEventListener('input', e => { state.search = e.target.value; state.focusSearch = true; render(); });
+      search.addEventListener('keydown', e => { if (e.key === 'Escape') { state.search = ''; state.focusSearch = true; render(); } });
+      if (state.focusSearch) {
+        search.focus();
+        search.setSelectionRange(search.value.length, search.value.length);
+        state.focusSearch = false;
       }
-    });
-  });
-}
-
-function bindDetailButtons() {
-  document.querySelectorAll('[data-detail-key]').forEach(button => {
-    if (button.dataset.detailBound === 'true') return;
-    button.dataset.detailBound = 'true';
-    button.addEventListener('click', () => openDetail(button.dataset.detailKey));
-    button.addEventListener('keydown', event => {
-      if (event.key === 'Enter' || event.key === ' ') {
-        event.preventDefault();
-        openDetail(button.dataset.detailKey);
-      }
-    });
-  });
-}
-
-async function refresh() {
-  setMode('connecting', 'Fetching dashboard data.');
-  try {
-    const response = await fetch(apiUrl(), { cache: 'no-store' });
-    if (!response.ok) throw new Error(`Dashboard API failed with ${response.status}`);
-    const raw = await response.json();
-    const data = normalizeData(raw);
-    setMode('live', `Updated ${formatTime(data.generatedAt)}.`);
-    renderAll(data);
-  } catch (error) {
-    const data = normalizeData(latestData?.rawSource || emptyData);
-    setMode('error', error.message, error);
-    renderAll(data);
-  }
-}
-
-function scheduleRefresh() {
-  clearInterval(refreshTimer);
-  if (!els.autoRefreshToggle.checked) return;
-  refreshTimer = setInterval(() => {
-    refresh().catch(error => setMode('error', error.message, error));
-  }, 15000);
-}
-
-function bootRouting() {
-  els.navLinks.forEach(link => {
-    link.addEventListener('click', event => {
-      event.preventDefault();
-      routeTo(link.dataset.route);
-    });
-  });
-
-  els.routeButtons.forEach(button => {
-    button.addEventListener('click', () => routeTo(button.dataset.routeButton));
-  });
-
-  window.addEventListener('hashchange', () => {
-    routeTo(window.location.hash.slice(1) || 'overview', { updateHash: false });
-  });
-
-  routeTo(window.location.hash.slice(1) || 'overview', { updateHash: false });
-}
-
-function bootControls() {
-  els.refreshButton.addEventListener('click', () => refresh());
-  els.mobileRefreshButton.addEventListener('click', () => refresh());
-  els.autoRefreshToggle.addEventListener('change', () => {
-    if (latestData) renderSystem(latestData);
-    scheduleRefresh();
-  });
-  els.dashboardSearch.addEventListener('input', applySearch);
-  els.sprintStatusFilter.addEventListener('change', () => latestData && renderSprints(latestData));
-  els.sprintSort.addEventListener('change', () => latestData && renderSprints(latestData));
-  els.taskStatusFilter.addEventListener('change', () => latestData && renderTasks(latestData));
-  els.activityTypeFilter.addEventListener('change', () => latestData && renderActivity(latestData.focus.recentActivity));
-  els.mobileNavButton?.addEventListener('click', () => {
-    const isOpen = document.body.classList.toggle('nav-open');
-    els.mobileNavButton.setAttribute('aria-expanded', String(isOpen));
-  });
-
-  window.addEventListener('keydown', event => {
-    if (event.key === '/' && document.activeElement !== els.dashboardSearch) {
-      event.preventDefault();
-      els.dashboardSearch.focus();
     }
+  }
+
+  document.addEventListener('click', event => {
+    const target = event.target.closest('[data-route],[data-select],[data-action],[data-copy],[data-copy-json]');
+    if (!target) return;
+    if (target.dataset.route) { setRoute(target.dataset.route); return; }
+    if (target.dataset.select) { selectKey(target.dataset.select); return; }
+    if (target.dataset.copy) { copyText(target.dataset.copy, 'copied command'); return; }
+    if (target.dataset.copyJson) {
+      const obj = state.index.get(target.dataset.copyJson);
+      if (obj) {
+        state.copied = `json:${keyOf(obj)}`;
+        copyText(JSON.stringify(obj, null, 2), 'copied raw json');
+        setTimeout(() => { state.copied = ''; render(); }, 1000);
+      }
+      return;
+    }
+    const action = target.dataset.action;
+    if (action === 'back') goBack();
+    if (action === 'close') closeRail();
+    if (action === 'refresh') loadDashboard();
+    if (action === 'fixture') { localStorage.setItem('mm.dashboard.fixture', 'true'); window.location.search = '?fixture=1'; }
+  });
+
+  document.addEventListener('keydown', event => {
     if (event.key === 'Escape') {
-      closeDetail();
-      document.body.classList.remove('nav-open');
-      els.mobileNavButton?.setAttribute('aria-expanded', 'false');
+      if (state.selectedKey) closeRail();
+      else if (state.search) { state.search = ''; render(); }
+    }
+    if ((event.key === '/' || (event.key.toLowerCase() === 'k' && (event.metaKey || event.ctrlKey))) && state.active !== 'home') {
+      event.preventDefault();
+      const input = $('searchInput'); if (input) { input.focus(); input.setSelectionRange(input.value.length, input.value.length); }
+    }
+    if (event.key.toLowerCase() === 'r' && !event.metaKey && !event.ctrlKey && document.activeElement?.tagName !== 'INPUT') {
+      loadDashboard({ silent: true });
     }
   });
 
-  els.detailDrawerScrim?.addEventListener('click', closeDetail);
-  els.detailCloseButton?.addEventListener('click', closeDetail);
-}
+  function makeFixture() {
+    const now = nowIso();
+    const issues = [
+      { id: 'issue-1', kind: 'issue', title: "Right rail doesn't reflect live git state", status: 'in_progress', issueType: 'workflow', severity: 'P1', confidence: 'confirmed', impact: "Cards can show clean seconds after a tracked file changed on disk, so the cockpit lies about what's safe to ship.", proposedFix: 'Poll git status and update trust dots without a full reload.', relatedTask: 'task-2', sourceDiscoveryIds: ['discovery-1'], path: 'memory/issues/issue-1.md', git: { branch: 'main', isDirty: false, lastCommit: { hash: '7c1a902', subject: 'file issue: stale git state', date: '2026-06-14' }, changedFiles: [] } },
+      { id: 'bug-1', kind: 'issue', title: 'Clicking a phase link does nothing', status: 'blocked', issueType: 'bug', severity: 'P0', confidence: 'needs_reproduction', impact: 'Phase chips render as plain text instead of relationship controls.', reproductionSteps: ['Open any task with a phaseId', 'Click the phase chip in the right rail', 'Nothing happens'], proposedFix: 'Route chip clicks through the object index.', relatedTaskIds: ['task-3'], path: 'memory/issues/bug-1.md' }
+    ];
+    const snapshot = {
+      generatedAt: now,
+      indices: { sprintSummaryCount: 1, taskSummaryCount: 3 },
+      summary: {
+        sprints: { total: 1, active: 1, planned: 0, completed: 0 },
+        phases: { total: 2, completed: 0, active: 1 },
+        tasks: { total: 3, done: 1, blocked: 1, inProgress: 1 },
+        issues: { total: 2, open: 2, bySeverity: { P0: 1, P1: 1 }, byStatus: { in_progress: 1, blocked: 1 } },
+        discoveries: { total: 1, promoted: 0, pending: 1, byStatus: { needs_research: 1 }, recent: [
+          { id: 'discovery-1', kind: 'discovery', title: 'One generic rail renderer beats eight bespoke detail pages', status: 'needs_research', discoveryType: 'pattern', confidence: 'high', summary: 'A single right rail renderer can branch on object kind and keep navigation in one place.', sourceRawItemIds: ['raw-1'], relatedTasks: ['task-3'], promotedTo: ['task-3'], path: 'memory/work/discoveries/discovery-1.md', git: { branch: 'main', isDirty: false, lastCommit: { hash: '5e2b310', subject: 'log discovery: rail pattern', date: '2026-06-13' }, changedFiles: [] } }
+        ] },
+        raw: { total: 1, unresolved: 1, processed: 0, rejected: 0, recent: [
+          { id: 'raw-1', kind: 'raw', title: 'Note: should the rail show agent run history?', status: 'unreconciled', sourceType: 'user_note', summary: 'Was reviewing task-3 and wondered if the right rail should surface which agent last touched the object and what command it ran.', promotedTo: ['discovery-1'], path: 'memory/inbox/raw-items.jsonl' }
+        ] },
+        relationships: { total: 8 },
+        wiki: { pages: 1 },
+        search: { ready: true, builtAt: now, pages: 1, chunks: 142, mode: 'hybrid', vectorDims: 2048, indexed: true, stale: false, missing: false }
+      },
+      focus: {
+        sprints: [{
+          id: 'sprint-18', kind: 'sprint', title: 'Dashboard Rebuild', status: 'active', goal: 'Replace the broken viewer with a cockpit that shows trust state, not just files.', startDate: '2026-06-10', endDate: '2026-06-24', phaseIds: ['phase-1','phase-2'], taskIds: ['task-1','task-2','task-3'], issueIds: ['issue-1'], discoveryIds: ['discovery-1'], completion: { total: 3, done: 1, blocked: 1, verified: 1 }, tags: ['dashboard','ui'], path: 'memory/work/sprints/sprint-18.md', git: { branch: 'main', isDirty: true, lastCommit: { hash: 'a3f91c2', subject: 'wire right rail to task list', date: '2026-06-16' }, changedFiles: ['dashboard/app.js','dashboard/styles.css'] }, index: { indexed: true, stale: false, chunkCount: 142, lastIndexedAt: now }, phases: [
+            { id: 'phase-1', kind: 'phase', title: 'Read-only shell + right rail', status: 'active', goal: 'Stand up the shell and the right rail so every object kind can be inspected by clicking it.', taskIds: ['task-1','task-2'], dependsOn: [], git: { branch: 'main', isDirty: true, lastCommit: { hash: 'a3f91c2', subject: 'wire right rail to task list', date: '2026-06-16' }, changedFiles: ['dashboard/app.js'] }, index: { indexed: true, stale: false, chunkCount: 38, lastIndexedAt: now }, tasks: [
+              { id: 'task-1', kind: 'task', title: 'Build right rail component', status: 'done', taskType: 'implementation', priority: 'P1', acceptanceCriteria: ['Selecting any object opens the rail', 'Rail shows metadata, relationships, git, index'], verificationEvidence: [{ id: 'evidence-1', type: 'manual-review', summary: 'Clicked through all 8 kinds', result: 'pass' }], filesTouched: ['dashboard/app.js'], git: { branch: 'main', isDirty: false, lastCommit: { hash: '9b7f001', subject: 'add right rail base component', date: '2026-06-15' }, changedFiles: [] }, index: { indexed: true, stale: false, chunkCount: 6, lastIndexedAt: now } },
+              { id: 'task-2', kind: 'task', title: 'Wire live git status into cards', status: 'in_progress', taskType: 'implementation', priority: 'P1', blockedBy: ['bug-1'], acceptanceCriteria: ['Every card shows dirty/clean state', 'Trust strip updates on selection'], verificationEvidence: [], filesTouched: ['dashboard/app.js'], git: { branch: 'main', isDirty: true, lastCommit: { hash: 'a3f91c2', subject: 'wire right rail to task list', date: '2026-06-16' }, changedFiles: ['dashboard/app.js'] }, index: { indexed: true, stale: false, chunkCount: 4, lastIndexedAt: now } }
+            ] },
+            { id: 'phase-2', kind: 'phase', title: 'Relationship navigation', status: 'planned', goal: 'Make every relationship a link. Clicking a phase, task, or bug opens it.', taskIds: ['task-3'], dependsOn: ['phase-1'], git: { branch: 'main', isDirty: false, lastCommit: { hash: 'd12e4aa', subject: 'scaffold phase board', date: '2026-06-12' }, changedFiles: [] }, index: { indexed: true, stale: true, chunkCount: 9, lastIndexedAt: now }, tasks: [
+              { id: 'task-3', kind: 'task', title: 'Make relationship pills clickable', status: 'blocked', taskType: 'implementation', priority: 'P0', blockedBy: ['bug-1'], related: ['discovery-1'], acceptanceCriteria: ['Clicking a phase/task/bug chip navigates to it', 'Back button supports nav history'], verificationEvidence: [], filesTouched: [], git: { branch: 'main', isDirty: false, lastCommit: { hash: 'd12e4aa', subject: 'scaffold phase board', date: '2026-06-12' }, changedFiles: [] }, index: { indexed: true, stale: true, chunkCount: 0, lastIndexedAt: now } }
+            ] }
+          ]
+        }],
+        featuredSprints: [],
+        recentSprints: [],
+        recentActivity: []
+      }
+    };
+    return { snapshot, optionals: { issues, wiki: [
+      { id: 'wiki-1', kind: 'wiki', title: 'Dashboard Architecture', status: 'fresh', wikiKind: 'system', freshness: 'fresh', tags: ['architecture','ui'], backlinks: ['sprint-18'], relatedTasks: ['task-1','task-3'], body: '# Why this exists\nMost dashboards show files. This one shows whether the files can be trusted.\n\n## The three zones\nLeft sidebar is navigation and counts. Main panel is the list for the object kind. Right rail is the inspector.\n\n## The trust strip\nEvery card carries three dots: git state, index freshness, and object status.', path: 'memory/wiki/dashboard-architecture.md', index: { indexed: true, stale: false, chunkCount: 5, lastIndexedAt: now } }
+    ], git: { branch: 'main', dirtyFiles: ['dashboard/app.js','dashboard/styles.css'] } } };
+  }
 
-bootRouting();
-bootControls();
-refresh().then(scheduleRefresh).catch(error => {
-  setMode('error', error.message, error);
-  renderAll(normalizeData(emptyData));
-});
+  loadDashboard();
+  state.poll = setInterval(() => loadDashboard({ silent: true }), POLL_MS);
+})();
