@@ -50,6 +50,8 @@
     toast: '',
     focusSearch: false,
     gitStatus: null,
+    detailCache: new Map(),
+    detailState: new Map(),
     endpointLog: [],
     poll: null
   };
@@ -230,8 +232,11 @@
     data.wiki = wiki.map(x => normalizeObject(x, 'wiki'));
 
     state.data = data;
+    state.detailCache.clear();
+    state.detailState.clear();
     rebuildIndex();
     restoreSelection();
+    void refreshSelectedDetail();
   }
 
   function normalizeObject(input, kind) {
@@ -388,12 +393,14 @@
 
   function renderHome() {
     const all = allObjects();
-    const dirty = gitDirtyCount(all);
+    const authoredDirty = authoredDirtyCount();
+    const generatedDirty = generatedDirtyCount();
     const stale = indexStaleCount(all);
     const rawOpen = state.snapshot?.summary?.raw?.unresolved ?? state.data.raw.filter(x => ['unreconciled','processing'].includes(x.status)).length;
     const blockers = state.data.task.filter(x => x.status === 'blocked').length + state.data.bug.filter(x => severityColor(x) === 'rose').length;
     const cards = [
-      { label: 'git', value: dirty, unit: 'dirty objects', color: dirty ? 'rose' : 'emerald' },
+      { label: 'git authored', value: authoredDirty, unit: 'dirty files', color: authoredDirty ? 'rose' : 'emerald' },
+      { label: 'git generated', value: generatedDirty, unit: 'dirty files', color: generatedDirty ? 'amber' : 'emerald' },
       { label: 'index', value: stale, unit: 'stale', color: stale ? 'amber' : 'emerald' },
       { label: 'raw inbox', value: rawOpen, unit: 'unprocessed', color: rawOpen ? 'amber' : 'emerald' },
       { label: 'blockers', value: blockers, unit: 'needs attention', color: blockers ? 'rose' : 'emerald' }
@@ -460,10 +467,56 @@
     </button>`;
   }
 
-  function selectedObject() { return state.selectedKey ? state.index.get(state.selectedKey) : null; }
+  function selectedObject() {
+    if (!state.selectedKey) return null;
+    return state.detailCache.get(state.selectedKey) || state.index.get(state.selectedKey) || null;
+  }
+
+  function selectedDetailStatus() {
+    return state.selectedKey ? state.detailState.get(state.selectedKey) || null : null;
+  }
+
+  function entityEndpointKind(obj) {
+    const kind = String(obj?.kind || '').toLowerCase();
+    if (['concept', 'decision', 'system', 'project', 'process', 'source', 'synthesis', 'note'].includes(kind)) return 'wiki';
+    if (kind === 'bug') return 'issue';
+    if (kind === 'wiki') return 'wiki';
+    if (kind === 'raw') return 'raw';
+    return kind || null;
+  }
+
+  function mergeSelectedDetail(base, entity) {
+    if (!base) return entity || null;
+    const merged = { ...base, ...(entity || {}) };
+    merged.kind = base.kind || merged.kind;
+    merged.id = base.id || merged.id;
+    merged.path = merged.path || base.path || null;
+    return merged;
+  }
+
+  async function refreshSelectedDetail() {
+    const base = state.selectedKey ? state.index.get(state.selectedKey) : null;
+    if (!base) return;
+    if (state.detailCache.has(state.selectedKey)) return;
+    if (selectedDetailStatus()?.loading) return;
+    const kind = entityEndpointKind(base);
+    if (!kind) return;
+    state.detailState.set(state.selectedKey, { loading: true, error: '' });
+    render();
+    const requestKey = state.selectedKey;
+    const result = await readJson(`/api/entity/${encodeURIComponent(kind)}/${encodeURIComponent(idOf(base))}`);
+    if (result.ok && result.data?.entity) {
+      state.detailCache.set(requestKey, mergeSelectedDetail(base, result.data.entity));
+      state.detailState.set(requestKey, { loading: false, error: '' });
+    } else {
+      state.detailState.set(requestKey, { loading: false, error: result.error || 'Unable to load entity detail' });
+    }
+    if (requestKey === state.selectedKey) render();
+  }
 
   function renderRightRail(obj) {
     const meta = KIND_META[obj.kind] || KIND_META.task;
+    const detailState = selectedDetailStatus();
     return `<aside class="right-rail" aria-label="Inspector">
       <div class="rail-top">
         <button class="rail-button" data-action="back" ${state.history.length ? '' : 'disabled'}>${icon('chevronLeft')} back</button>
@@ -476,6 +529,8 @@
         ${arr(obj.tags).length ? `<div class="tag-row">${arr(obj.tags).map(t => `<span class="tag">#${esc(t)}</span>`).join('')}</div>` : ''}
       </div>
       <div class="rail-body">
+        ${detailState?.loading ? `<div class="raw-warning">${icon('database')} loading canonical entity...</div>` : ''}
+        ${detailState?.error ? `<div class="raw-warning">${icon('x')} ${esc(detailState.error)}</div>` : ''}
         ${obj.kind === 'raw' ? `<div class="raw-warning">${icon('shield')} untrusted raw input — not yet promoted</div>` : ''}
         ${renderKindDetail(obj)}
         ${obj.path ? renderField('path', `<div class="field-value mono">${esc(obj.path)}</div>`) : ''}
@@ -671,17 +726,31 @@
   function gitBranch() { return state.gitStatus?.branch || state.gitStatus?.currentBranch || 'main'; }
   function dirtyFiles() {
     const g = state.gitStatus || {};
-    return arr(g.dirtyFiles || g.changedFiles || g.unstaged || g.files).map(x => typeof x === 'string' ? x : x.path || x.file || '').filter(Boolean);
+    if (Array.isArray(g.changedFiles)) return g.changedFiles.map(x => typeof x === 'string' ? x : x.path || x.file || '').filter(Boolean);
+    if (Array.isArray(g.generatedDirtyFiles) || Array.isArray(g.authoredDirtyFiles)) {
+      return [...arr(g.generatedDirtyFiles), ...arr(g.authoredDirtyFiles)].map(x => typeof x === 'string' ? x : x.path || x.file || '').filter(Boolean);
+    }
+    return arr(g.unstaged || g.files).map(x => typeof x === 'string' ? x : x.path || x.file || '').filter(Boolean);
   }
-  function gitDirtyCount(all = allObjects()) {
-    const files = dirtyFiles();
+  function authoredDirtyCount() {
+    const g = state.gitStatus || {};
+    if (Number.isFinite(g.authoredDirtyCount)) return g.authoredDirtyCount;
+    const files = dirtyFiles().filter(file => !isGeneratedDirtyFile(file));
     if (files.length) return files.length;
-    return all.filter(x => x.git?.isDirty).length;
+    return allObjects().filter(x => x.git?.isDirty).length;
+  }
+  function generatedDirtyCount() {
+    const g = state.gitStatus || {};
+    if (Number.isFinite(g.generatedDirtyCount)) return g.generatedDirtyCount;
+    return dirtyFiles().filter(isGeneratedDirtyFile).length;
   }
   function indexStaleCount(all = allObjects()) {
     const objectCount = all.filter(x => x.index?.stale || x.stale).length;
     const search = state.snapshot?.summary?.search;
     return objectCount + (search?.stale || search?.missing ? 1 : 0);
+  }
+  function isGeneratedDirtyFile(file) {
+    return String(file || '').startsWith('memory/generated/') || String(file || '').startsWith('memory/.mm/search/') || String(file || '').startsWith('memory/.mm/results/');
   }
 
   function selectKey(key, pushHistory = true) {
@@ -694,6 +763,7 @@
     localStorage.setItem('mm.dashboard.active', state.active);
     updateUrl();
     render();
+    void refreshSelectedDetail();
   }
   function goBack() {
     if (!state.history.length) return;

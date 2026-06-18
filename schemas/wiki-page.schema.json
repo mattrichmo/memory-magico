@@ -4,14 +4,47 @@
   "title": "MemoryMagico Wiki Frontmatter",
   "description": "Canonical markdown frontmatter for a wiki page.",
   "type": "object",
-  "additionalProperties": true,
+  "additionalProperties": false,
   "required": ["id", "kind", "title", "status", "createdAt", "updatedAt"],
   "properties": {
-    "id": { "type": "string" },
-    "kind": { "type": "string" },
-    "title": { "type": "string" },
-    "status": { "type": "string" },
-    "createdAt": { "type": "string" },
-    "updatedAt": { "type": "string" }
+    "id": { "type": "string", "pattern": "^[a-z][a-z0-9_-]*$" },
+    "kind": {
+      "enum": ["note", "concept", "decision", "system", "project", "process", "source", "synthesis"]
+    },
+    "title": { "type": "string", "minLength": 1 },
+    "status": { "enum": ["draft", "active", "stable", "deprecated", "archived"] },
+    "aliases": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "uniqueItems": true,
+      "default": []
+    },
+    "tags": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "uniqueItems": true,
+      "default": []
+    },
+    "sourceRefs": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "uniqueItems": true,
+      "default": []
+    },
+    "related": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "uniqueItems": true,
+      "default": []
+    },
+    "paths": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "self": { "type": "string", "minLength": 1 }
+      }
+    },
+    "createdAt": { "type": "string", "format": "date-time" },
+    "updatedAt": { "type": "string", "format": "date-time" }
   }
 }

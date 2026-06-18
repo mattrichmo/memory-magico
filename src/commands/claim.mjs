@@ -1,9 +1,11 @@
 import { makeId } from '../core/ids.mjs';
 import { appendClaim, readClaims, writeClaims } from '../core/claims.mjs';
 import { resolveNodeRef } from '../core/entities.mjs';
+import { writeJsonOutput } from '../core/renderers.mjs';
 
 export async function run(argv) {
   const sub = argv[1] || 'list';
+  const json = argv.includes('--json');
   if (sub === 'add') {
     const subject = argv[2];
     const textParts = [];
@@ -38,6 +40,10 @@ export async function run(argv) {
       updatedAt: new Date().toISOString(),
     };
     await appendClaim(claim);
+    if (json) {
+      writeJsonOutput({ ok: true, claim });
+      return;
+    }
     console.log('Added claim:', claim.id);
     return;
   }
@@ -46,6 +52,10 @@ export async function run(argv) {
     const subject = argv[2];
     const claims = await readClaims();
     const filtered = subject ? claims.filter(claim => claim.subject === subject) : claims;
+    if (json) {
+      writeJsonOutput({ ok: true, claims: filtered });
+      return;
+    }
     if (!filtered.length) {
       console.log('No claims found.');
       return;
@@ -69,7 +79,7 @@ export async function run(argv) {
     }
     const claims = await readClaims();
     const now = new Date().toISOString();
-    claims.push({
+    const claim = {
       id: makeId('claim'),
       subject: `contradiction:${a}:${b}`,
       text: reason,
@@ -78,8 +88,13 @@ export async function run(argv) {
       sourceRefs: [await resolveNodeRef(a), await resolveNodeRef(b)],
       createdAt: now,
       updatedAt: now,
-    });
+    };
+    claims.push(claim);
     await writeClaims(claims);
+    if (json) {
+      writeJsonOutput({ ok: true, claim });
+      return;
+    }
     console.log(`Contradiction recorded between ${a} and ${b}`);
     return;
   }

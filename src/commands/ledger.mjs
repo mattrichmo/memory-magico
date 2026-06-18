@@ -39,11 +39,12 @@ async function inspectLedger(filePath, tail = 0) {
     };
   }
 
-  const value = safeParseJson(text, undefined);
+  const invalid = Symbol('invalid-json');
+  const value = safeParseJson(text, invalid);
   return {
     format: 'json',
     path: path.relative(repoRoot, filePath),
-    valid: value !== undefined || String(text || '').trim() === 'null',
+    valid: value !== invalid,
     value,
   };
 }

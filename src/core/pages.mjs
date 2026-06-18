@@ -1,13 +1,15 @@
 import path from 'path';
 import { memoryRoot } from './paths.mjs';
 import { parseMarkdownPage, normalizeFrontmatterKeys } from './frontmatter.mjs';
-import { readDirRecursive, readFile } from './fs.mjs';
+import { readDirRecursive, readFile, stat } from './fs.mjs';
 import { slugify } from './slugs.mjs';
 
 const DEFAULT_ROOTS = [
   path.join(memoryRoot, 'wiki'),
   path.join(memoryRoot, 'work'),
 ];
+
+const PAGE_CACHE = new Map();
 
 function isGeneratedPath(filePath) {
   const rel = path.relative(memoryRoot, filePath);
@@ -88,37 +90,49 @@ export async function scanMarkdownPages(roots = DEFAULT_ROOTS) {
   }
   const pages = [];
   for (const filePath of files) {
-    const text = await readFile(filePath, 'utf8');
-    const parsed = parseMarkdownPage(text);
-    const frontmatter = normalizeFrontmatterKeys(parsed.frontmatter || {});
-    const body = parsed.body || '';
-    const title = frontmatter.title || firstHeading(body) || path.basename(filePath, '.md');
-    const rel = path.relative(memoryRoot, filePath);
-    const slug = frontmatter.slug || slugify(title);
-    const id = frontmatter.id || `${frontmatter.kind || 'page'}_${slug}`;
-    const chunks = chunkMarkdown(body, title);
-    pages.push({
-      id,
-      kind: frontmatter.kind || 'note',
-      title,
-      path: rel,
-      slug,
-      aliases: Array.isArray(frontmatter.aliases) ? frontmatter.aliases : [],
-      tags: Array.isArray(frontmatter.tags) ? frontmatter.tags : [],
-      semanticTerms: Array.isArray(frontmatter.semanticTerms) ? frontmatter.semanticTerms : [],
-      links: extractWikiLinks(body),
-      sourceRefs: Array.isArray(frontmatter.sourceRefs) ? frontmatter.sourceRefs : [],
-      status: frontmatter.status || 'draft',
-      createdAt: frontmatter.createdAt || frontmatter.created_at || null,
-      updatedAt: frontmatter.updatedAt || frontmatter.updated_at || null,
-      number: frontmatter.number ?? null,
-      body,
-      chunks,
-      frontmatter,
-      errors: parsed.errors || [],
-    });
+    const fileStat = await stat(filePath);
+    const cached = PAGE_CACHE.get(filePath);
+    if (cached && cached.mtimeMs === fileStat.mtimeMs && cached.size === fileStat.size) {
+      pages.push(cached.page);
+      continue;
+    }
+    const page = await parseMarkdownFile(filePath);
+    pages.push(page);
+    PAGE_CACHE.set(filePath, { mtimeMs: fileStat.mtimeMs, size: fileStat.size, page: pages[pages.length - 1] });
   }
   return pages;
+}
+
+export async function parseMarkdownFile(filePath) {
+  const text = await readFile(filePath, 'utf8');
+  const parsed = parseMarkdownPage(text);
+  const frontmatter = normalizeFrontmatterKeys(parsed.frontmatter || {});
+  const body = parsed.body || '';
+  const title = frontmatter.title || firstHeading(body) || path.basename(filePath, '.md');
+  const rel = path.relative(memoryRoot, filePath);
+  const slug = frontmatter.slug || slugify(title);
+  const id = frontmatter.id || `${frontmatter.kind || 'page'}_${slug}`;
+  const chunks = chunkMarkdown(body, title);
+  return {
+    id,
+    kind: frontmatter.kind || 'note',
+    title,
+    path: rel,
+    slug,
+    aliases: Array.isArray(frontmatter.aliases) ? frontmatter.aliases : [],
+    tags: Array.isArray(frontmatter.tags) ? frontmatter.tags : [],
+    semanticTerms: Array.isArray(frontmatter.semanticTerms) ? frontmatter.semanticTerms : [],
+    links: extractWikiLinks(body),
+    sourceRefs: Array.isArray(frontmatter.sourceRefs) ? frontmatter.sourceRefs : [],
+    status: frontmatter.status || 'draft',
+    createdAt: frontmatter.createdAt || frontmatter.created_at || null,
+    updatedAt: frontmatter.updatedAt || frontmatter.updated_at || null,
+    number: frontmatter.number ?? null,
+    body,
+    chunks,
+    frontmatter,
+    errors: parsed.errors || [],
+  };
 }
 
 export function pageIndexRows(pages) {

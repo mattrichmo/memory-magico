@@ -6,6 +6,7 @@ import { appendHistory } from '../core/history.mjs';
 import { findRecordById, listRecordsWithIndexFallback, persistRecord } from '../core/records.mjs';
 import { parseArgs, splitList } from '../core/cli.mjs';
 import { ENUMS, assertEnum, assertEntityExists, assertEntityListExists, assertTaskTransition, evidenceFromOpts } from '../core/guards.mjs';
+import { writeJsonOutput } from '../core/renderers.mjs';
 
 const indexFile = path.join(memoryRoot, 'work', 'tasks', 'index.jsonl');
 const taskRoot = path.join(memoryRoot, 'work', 'tasks');
@@ -73,6 +74,7 @@ async function persistTask(item) {
 
 export async function run(argv) {
   const sub = argv[1] || 'list';
+  const json = argv.includes('--json');
 
   if (sub === 'create') {
     const task = createTask(parseArgs(argv, 2));
@@ -86,6 +88,10 @@ export async function run(argv) {
     await assertEntityListExists(task.issueIds, 'issue', 'issue');
     await assertEntityListExists(task.containerIds, 'container', 'container');
     await persistTask(task);
+    if (json) {
+      writeJsonOutput({ ok: true, item: task });
+      return;
+    }
     console.log('Created task:', task.id);
     return;
   }
@@ -99,6 +105,10 @@ export async function run(argv) {
       if (opts['phase-id'] && item.phaseId !== opts['phase-id']) return false;
       return true;
     });
+    if (json) {
+      writeJsonOutput({ ok: true, items: filtered });
+      return;
+    }
     if (!filtered.length) {
       console.log('No tasks found.');
       return;
@@ -116,6 +126,10 @@ export async function run(argv) {
     const task = await loadTask(id);
     if (!task) {
       console.log('Task not found:', id);
+      return;
+    }
+    if (json) {
+      writeJsonOutput({ ok: true, item: task });
       return;
     }
     console.log(JSON.stringify(task, null, 2));
@@ -164,6 +178,10 @@ export async function run(argv) {
       ...(opts['deferred-reason'] ? { deferredReason: opts['deferred-reason'] } : {}),
     });
     await persistTask(task);
+    if (json) {
+      writeJsonOutput({ ok: true, item: task });
+      return;
+    }
     console.log('Updated task:', id);
     return;
   }
@@ -198,6 +216,10 @@ export async function run(argv) {
       ...(ev?.evidenceRefs ? { evidenceRefs: ev.evidenceRefs } : {}),
     });
     await persistTask(task);
+    if (json) {
+      writeJsonOutput({ ok: true, item: task });
+      return;
+    }
     console.log('Completed task:', id);
     return;
   }

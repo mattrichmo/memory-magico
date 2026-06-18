@@ -1,3 +1,4 @@
+import fs from 'node:fs/promises';
 import path from 'path';
 import { memoryRoot, repoRoot, schemasRoot } from '../core/paths.mjs';
 import { readJsonFile, readJsonl } from '../core/json.mjs';
@@ -8,6 +9,7 @@ import { entityRefExists, findEntityRecord } from '../core/entities.mjs';
 import { writeJsonOutput } from '../core/renderers.mjs';
 import { scanMarkdownPages } from '../core/pages.mjs';
 import { detectSuspiciousUnicode } from '../core/string-safety.mjs';
+import { validateRoleContract } from '../core/role-contracts.mjs';
 
 const checks = [
   { label: 'containers', schema: 'container.schema.json', dir: path.join(memoryRoot, 'work', 'containers') },
@@ -24,6 +26,10 @@ function repoRelative(filePath) { return path.relative(repoRoot, filePath) || fi
 async function loadSchema(schemaFile) { return readJsonFile(path.join(schemasRoot, schemaFile)); }
 async function readDirRecords(dir) {
   const files = await readDirRecursive(dir, { filter: filePath => filePath.endsWith('.md') });
+  return files.map(file => ({ file }));
+}
+async function readJsonDirRecords(dir) {
+  const files = await readDirRecursive(dir, { filter: filePath => filePath.endsWith('.json') });
   return files.map(file => ({ file }));
 }
 async function validateIdList(errors, warnings, ownerLabel, ids, explicitKind, severity = 'error') {
@@ -70,6 +76,25 @@ async function lintRawItems(errors, warnings) {
 }
 
 async function lintStructuredRecords(errors, warnings, bag) {
+  const seenIds = new Map();
+  const registerRecord = (record, rel, sourceType, label) => {
+    if (!record?.id) return;
+    const entry = seenIds.get(record.id) || { markdown: null, json: null, other: null };
+    if (entry[sourceType]) {
+      errors.push(`${rel}: duplicate record id ${record.id} already seen in ${entry[sourceType]}`);
+      return;
+    }
+    entry[sourceType] = rel;
+    seenIds.set(record.id, entry);
+    if (label !== 'discoveries') {
+      const known = [entry.markdown, entry.json, entry.other].filter(Boolean);
+      if (known.length > 1) {
+        const previous = known.find(value => value !== rel) || known[0];
+        errors.push(`${rel}: duplicate record id ${record.id} already seen in ${previous}`);
+      }
+    }
+  };
+
   for (const check of checks) {
     const schema = await loadSchema(check.schema);
     for (const entry of await readDirRecords(check.dir)) {
@@ -81,6 +106,7 @@ async function lintStructuredRecords(errors, warnings, bag) {
       }
       const record = page.frontmatter || {};
       bag[check.label].push(record);
+      registerRecord(record, rel, 'markdown', check.label);
       validateAgainstSchema(schema, record).forEach(message => errors.push(`${rel}: ${message}`));
 
       if (check.label === 'initiatives') {
@@ -132,6 +158,19 @@ async function lintStructuredRecords(errors, warnings, bag) {
         if (record.status === 'done' && !needEvidence(record)) errors.push(`${rel}: done task requires verificationEvidence`);
       }
     }
+    for (const entry of await readJsonDirRecords(check.dir)) {
+      const rel = repoRelative(entry.file);
+      let record;
+      try {
+        record = await readJsonFile(entry.file);
+      } catch (err) {
+        errors.push(`${rel}: malformed JSON (${err.message})`);
+        continue;
+      }
+      bag[check.label].push(record);
+      registerRecord(record, rel, 'json', check.label);
+      validateAgainstSchema(schema, record).forEach(message => errors.push(`${rel}: ${message}`));
+    }
   }
 }
 
@@ -162,7 +201,7 @@ async function lintRelationships(errors, warnings) {
     const prefix = `memory/issues/relationships.jsonl:${index + 1}`;
     validateAgainstSchema(schema, edge).forEach(message => errors.push(`${prefix}: ${message}`));
     const key = JSON.stringify([edge.from, edge.to, edge.type]);
-    if (seen.has(key)) warnings.push(`${prefix}: duplicate relationship edge`);
+    if (seen.has(key)) errors.push(`${prefix}: duplicate relationship edge`);
     seen.add(key);
   });
   for (const [index, edge] of edges.entries()) {
@@ -206,12 +245,85 @@ async function lintUnicode(errors, warnings) {
 }
 
 async function lintJsonl(errors, warnings) {
-  for (const rel of ['inbox/raw-items.jsonl', 'issues/relationships.jsonl']) {
+  for (const rel of [
+    'inbox/raw-items.jsonl',
+    'issues/relationships.jsonl',
+    'generated/page-index.jsonl',
+    'generated/chunks.jsonl',
+  ]) {
     try {
       const rows = await readJsonl(path.join(memoryRoot, rel), { mode: 'strict' });
       if (!Array.isArray(rows)) errors.push(`${rel}: could not parse JSONL`);
     } catch (err) {
       errors.push(`${rel}: ${err.message}`);
+    }
+  }
+}
+
+function validateGeneratedShape(errors, rel, data, requiredKeys = []) {
+  if (!data || typeof data !== 'object' || Array.isArray(data)) {
+    errors.push(`${rel}: expected JSON object`);
+    return;
+  }
+  for (const key of requiredKeys) {
+    if (!(key in data)) errors.push(`${rel}: missing ${key}`);
+  }
+}
+
+async function lintGeneratedArtifacts(errors) {
+  const generatedFiles = [
+    {
+      rel: 'generated/dashboard.json',
+      kind: 'json',
+      requiredKeys: ['generatedAt', 'summary', 'focus', 'indices'],
+    },
+    {
+      rel: 'generated/search-index.json',
+      kind: 'json',
+      requiredKeys: ['builtAt', 'pages', 'chunks', 'bm25'],
+    },
+    {
+      rel: '.mm/search/manifest.json',
+      kind: 'json',
+      requiredKeys: ['builtAt', 'mode', 'pageCount', 'chunkCount', 'vectorDims'],
+    },
+  ];
+
+  for (const file of generatedFiles) {
+    const fullPath = path.join(memoryRoot, file.rel);
+    try {
+      const data = await readJsonFile(fullPath);
+      validateGeneratedShape(errors, file.rel, data, file.requiredKeys);
+    } catch (err) {
+      errors.push(`${file.rel}: ${err.message}`);
+    }
+  }
+}
+
+async function lintRoleContracts(errors) {
+  const rolesRoot = path.join(memoryRoot, 'agents', 'roles');
+  let entries = [];
+  try {
+    entries = await fs.readdir(rolesRoot, { withFileTypes: true });
+  } catch {
+    return;
+  }
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    const agentPath = path.join(rolesRoot, entry.name, 'AGENT.md');
+    try {
+      const page = await readMarkdownPage(agentPath);
+      const findings = validateRoleContract({
+        slug: entry.name,
+        allowedTools: Array.isArray(page.frontmatter?.allowed_tools) ? page.frontmatter.allowed_tools : [],
+        forbiddenTools: Array.isArray(page.frontmatter?.forbidden_tools) ? page.frontmatter.forbidden_tools : [],
+        skillGroups: Array.isArray(page.frontmatter?.skill_groups) ? page.frontmatter.skill_groups : [],
+      });
+      for (const finding of findings) {
+        errors.push(`memory/agents/roles/${entry.name}/AGENT.md: ${finding}`);
+      }
+    } catch (err) {
+      errors.push(`memory/agents/roles/${entry.name}/AGENT.md: ${err.message}`);
     }
   }
 }
@@ -237,6 +349,8 @@ export async function run(argv = []) {
     await lintFrontmatter(errors, warnings);
     await lintUnicode(errors, warnings);
     await lintJsonl(errors, warnings);
+    await lintGeneratedArtifacts(errors);
+    await lintRoleContracts(errors);
   }
   if (json) {
     writeJsonOutput({

@@ -5,6 +5,7 @@ import { readJsonFile, writeJsonFile } from '../core/json.mjs';
 import { findRecordById, listRecordsWithIndexFallback, persistRecord } from '../core/records.mjs';
 import { parseArgs, splitList } from '../core/cli.mjs';
 import { ENUMS, assertEnum, assertEntityListExists, assertIssueTransition, evidenceFromOpts } from '../core/guards.mjs';
+import { writeJsonOutput } from '../core/renderers.mjs';
 
 const indexFile = path.join(memoryRoot, 'work', 'issues', 'index.jsonl');
 const issueRoot = path.join(memoryRoot, 'work', 'issues');
@@ -138,6 +139,7 @@ async function persistIssue(issue) {
 
 export async function run(argv) {
   const sub = argv[1] || 'list';
+  const json = argv.includes('--json');
 
   if (sub === 'create') {
     const issue = createIssueFromOptions(parseArgs(argv, 2));
@@ -147,6 +149,10 @@ export async function run(argv) {
     await assertEntityListExists(issue.sourceDiscoveryIds, 'discovery', 'discovery');
     await assertEntityListExists(issue.sourceCommentIds, 'comment', 'comment');
     await persistIssue(issue);
+    if (json) {
+      writeJsonOutput({ ok: true, item: issue });
+      return;
+    }
     console.log('Created issue:', issue.id);
     return;
   }
@@ -160,6 +166,10 @@ export async function run(argv) {
       if (opts.severity && item.severity !== opts.severity) return false;
       return true;
     });
+    if (json) {
+      writeJsonOutput({ ok: true, items: filtered });
+      return;
+    }
     if (!filtered.length) {
       console.log('No issues found.');
       return;
@@ -178,6 +188,10 @@ export async function run(argv) {
     const issue = await loadIssue(id);
     if (!issue) {
       console.log('Issue not found:', id);
+      return;
+    }
+    if (json) {
+      writeJsonOutput({ ok: true, item: issue });
       return;
     }
     console.log(JSON.stringify(issue, null, 2));
@@ -208,6 +222,10 @@ export async function run(argv) {
     issue.updatedAt = now;
     issue.history = [...(issue.history || []), { at: now, event: 'updated', status, ...(opts.note ? { note: opts.note } : {}) }];
     await persistIssue(issue);
+    if (json) {
+      writeJsonOutput({ ok: true, item: issue });
+      return;
+    }
     console.log('Updated issue:', id);
     return;
   }
@@ -230,6 +248,10 @@ export async function run(argv) {
     issue.closedAt = now;
     issue.updatedAt = now;
     await persistIssue(issue);
+    if (json) {
+      writeJsonOutput({ ok: true, item: issue });
+      return;
+    }
     console.log('Closed issue:', id);
     return;
   }
@@ -255,6 +277,10 @@ export async function run(argv) {
     };
     issue.updatedAt = new Date().toISOString();
     await persistIssue(issue);
+    if (json) {
+      writeJsonOutput({ ok: true, item: issue });
+      return;
+    }
     console.log('Linked PR to issue:', id);
     return;
   }
@@ -279,6 +305,10 @@ export async function run(argv) {
     issue.updatedAt = now;
     issue.history = [...(issue.history || []), { at: now, event: 'verified', status: 'verified', ...(opts.note ? { note: opts.note } : {}) }];
     await persistIssue(issue);
+    if (json) {
+      writeJsonOutput({ ok: true, item: issue });
+      return;
+    }
     console.log('Verified issue:', id);
     return;
   }
@@ -298,6 +328,10 @@ export async function run(argv) {
     issue.status = sub === 'block' ? 'blocked' : (opts.status || 'ready_for_agent');
     issue.updatedAt = new Date().toISOString();
     await persistIssue(issue);
+    if (json) {
+      writeJsonOutput({ ok: true, item: issue });
+      return;
+    }
     console.log(`${sub === 'block' ? 'Blocked' : 'Unblocked'} issue:`, id);
     return;
   }

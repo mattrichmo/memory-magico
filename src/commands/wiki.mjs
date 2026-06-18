@@ -10,6 +10,7 @@ import { assertSafePathSegment } from '../core/safe-path.mjs';
 import { withLock } from '../core/lock.mjs';
 import { scanMarkdownPages } from '../core/pages.mjs';
 import { writeJsonOutput } from '../core/renderers.mjs';
+import { ENUMS, assertEnum } from '../core/guards.mjs';
 
 const wikiRoot = path.join(memoryRoot, 'wiki');
 const WIKI_KIND_DIRS = {
@@ -81,12 +82,25 @@ async function appendLog(line) {
   try {
     await fs.appendFile(logFile, `${line}\n`, 'utf8');
   } catch {
-    await writeMarkdownPage(logFile, { id: 'wiki_log', kind: 'note', title: 'Memory Log', status: 'draft', aliases: [], tags: [], sourceRefs: [], related: [], createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }, line);
+    await writeMarkdownPage(logFile, {
+      id: 'wiki_log',
+      kind: 'note',
+      title: 'Memory Log',
+      status: 'draft',
+      aliases: [],
+      tags: [],
+      sourceRefs: [],
+      related: [],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      paths: { self: path.relative(memoryRoot, logFile).split(path.sep).join('/') },
+    }, line);
   }
 }
 
 export async function run(argv) {
   const sub = argv[1] || 'list';
+  const json = argv.includes('--json');
   await ensureWikiRoot();
 
   if (sub === 'create') {
@@ -105,18 +119,37 @@ export async function run(argv) {
         console.log('Unknown wiki kind:', kind);
         return;
       }
+      assertEnum(status, ENUMS.wikiStatus, 'wiki status');
       assertSafePathSegment(kind, 'wiki kind');
       const file = await uniqueMarkdownPath(WIKI_KIND_DIRS[kind], title);
       const frontmatter = pageFrontmatter(title, kind, status);
+      frontmatter.paths = {
+        self: path.relative(memoryRoot, file).split(path.sep).join('/'),
+      };
       await writeMarkdownPage(file, frontmatter, bodyTemplate(kind, title));
       await appendLog(`## [${new Date().toISOString()}] wiki | Created ${title}\n`);
       await rebuildIndex();
+      if (json) {
+        writeJsonOutput({
+          ok: true,
+          page: {
+            path: path.relative(memoryRoot, file),
+            frontmatter,
+            body: bodyTemplate(kind, title),
+          },
+        });
+        return;
+      }
       console.log(`Created wiki page: ${path.relative(memoryRoot, file)}`);
     }, { command: 'mm wiki create' });
   }
 
   if (sub === 'list') {
     const files = await allWikiFiles();
+    if (json) {
+      writeJsonOutput({ ok: true, files: files.map(file => path.relative(memoryRoot, file)) });
+      return;
+    }
     if (!files.length) {
       console.log('No wiki pages found.');
       return;
@@ -173,6 +206,18 @@ export async function run(argv) {
       console.log('Wiki page not found:', target);
       return;
     }
+    if (json) {
+      const page = await readMarkdownPage(file);
+      writeJsonOutput({
+        ok: true,
+        page: {
+          path: path.relative(memoryRoot, file),
+          frontmatter: page.frontmatter,
+          body: page.body,
+        },
+      });
+      return;
+    }
     console.log(await fs.readFile(file, 'utf8'));
     return;
   }
@@ -190,10 +235,25 @@ export async function run(argv) {
       const tagIndex = argv.indexOf('--tag');
       const patch = {};
       if (titleIndex !== -1) patch.title = argv[titleIndex + 1];
-      if (statusIndex !== -1) patch.status = argv[statusIndex + 1];
+      if (statusIndex !== -1) {
+        assertEnum(argv[statusIndex + 1], ENUMS.wikiStatus, 'wiki status');
+        patch.status = argv[statusIndex + 1];
+      }
       if (tagIndex !== -1) patch.tags = [argv[tagIndex + 1]];
       await updateMarkdownFrontmatter(file, patch);
       await rebuildIndex();
+      if (json) {
+        const page = await readMarkdownPage(file);
+        writeJsonOutput({
+          ok: true,
+          page: {
+            path: path.relative(memoryRoot, file),
+            frontmatter: page.frontmatter,
+            body: page.body,
+          },
+        });
+        return;
+      }
       console.log(`Updated wiki page: ${target}`);
     }, { command: 'mm wiki update-frontmatter' });
   }
@@ -216,6 +276,17 @@ export async function run(argv) {
       await writeMarkdownPage(fromFile, page.frontmatter, nextBody);
       await appendLog(`## [${new Date().toISOString()}] wiki | Linked ${from} -> ${to}\n`);
       await rebuildIndex();
+      if (json) {
+        writeJsonOutput({
+          ok: true,
+          page: {
+            path: path.relative(memoryRoot, fromFile),
+            frontmatter: page.frontmatter,
+            body: nextBody,
+          },
+        });
+        return;
+      }
       console.log(`Linked ${from} -> ${to}`);
     }, { command: 'mm wiki link' });
   }
@@ -230,6 +301,10 @@ export async function run(argv) {
       return;
     }
     const matches = index.pages.filter(page => page.links?.some(link => slugify(link).includes(targetSlug) || String(link).toLowerCase().includes(String(target).toLowerCase())) || page.sourceRefs?.some(ref => String(ref).toLowerCase().includes(String(target).toLowerCase())));
+    if (json) {
+      writeJsonOutput({ ok: true, pages: matches });
+      return;
+    }
     if (!matches.length) {
       console.log('No backlinks found.');
       return;

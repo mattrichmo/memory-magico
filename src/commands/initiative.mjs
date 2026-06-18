@@ -5,6 +5,7 @@ import { appendHistory } from '../core/history.mjs';
 import { findRecordById, listRecordsWithIndexFallback, persistRecord } from '../core/records.mjs';
 import { parseArgs, splitList } from '../core/cli.mjs';
 import { ENUMS, assertEnum, assertEntityListExists } from '../core/guards.mjs';
+import { writeJsonOutput } from '../core/renderers.mjs';
 
 const indexFile = path.join(memoryRoot, 'work', 'initiatives', 'index.jsonl');
 const itemRoot = path.join(memoryRoot, 'work', 'initiatives');
@@ -64,6 +65,7 @@ async function persistInitiative(item) {
 
 export async function run(argv) {
   const sub = argv[1] || 'list';
+  const json = argv.includes('--json');
 
   if (sub === 'create') {
     const item = createInitiative(parseArgs(argv, 2));
@@ -72,6 +74,10 @@ export async function run(argv) {
     await assertEntityListExists(item.sprintIds, 'sprint', 'sprint');
     await assertEntityListExists(item.issueIds, 'issue', 'issue');
     await persistInitiative(item);
+    if (json) {
+      writeJsonOutput({ ok: true, item });
+      return;
+    }
     console.log('Created initiative:', item.id);
     return;
   }
@@ -80,6 +86,10 @@ export async function run(argv) {
     const opts = parseArgs(argv, 2);
     const items = await listRecordsWithIndexFallback(itemRoot, indexFile);
     const filtered = items.filter(item => !opts.status || item.status === opts.status);
+    if (json) {
+      writeJsonOutput({ ok: true, items: filtered });
+      return;
+    }
     if (!filtered.length) return console.log('No initiatives found.');
     filtered.forEach(item => console.log(`${item.id} [${item.status}] ${item.title}`));
     return;
@@ -90,6 +100,10 @@ export async function run(argv) {
     if (!id) return console.log('Usage: mm initiative show <id>');
     const item = await loadInitiative(id);
     if (!item) return console.log('Initiative not found:', id);
+    if (json) {
+      writeJsonOutput({ ok: true, item });
+      return;
+    }
     console.log(JSON.stringify(item, null, 2));
     return;
   }
@@ -119,6 +133,10 @@ export async function run(argv) {
     await assertEntityListExists(item.sprintIds, 'sprint', 'sprint');
     await assertEntityListExists(item.issueIds, 'issue', 'issue');
     await persistInitiative(item);
+    if (json) {
+      writeJsonOutput({ ok: true, item });
+      return;
+    }
     console.log('Updated initiative:', id);
     return;
   }

@@ -5,6 +5,8 @@ import { ensureDir, listJsonFiles, readJsonFile, readJsonl, writeJsonFile } from
 import { mirrorRecordToMarkdown } from './work-pages.mjs';
 import { readDirRecursive, readFile } from './fs.mjs';
 import { parseMarkdownPage } from './frontmatter.mjs';
+import { PATH_POLICIES } from './path-policies.mjs';
+import { assertSafePathSegment, resolveContainedPath } from './safe-path.mjs';
 
 export function latestById(items) {
   const map = new Map();
@@ -33,6 +35,11 @@ async function withFileLock(lockPath, fn) {
     await handle.close().catch(() => {});
     await fs.unlink(lockPath).catch(() => {});
   }
+}
+
+export async function resolveRecordJsonPath(dirPath, id, policy = PATH_POLICIES.MEMORY_READ) {
+  const safeId = assertSafePathSegment(id, 'record id');
+  return resolveContainedPath(dirPath, `${safeId}.json`, policy);
 }
 
 export async function rewriteJsonl(filePath, items) {
@@ -96,6 +103,7 @@ export async function upsertIndexRecord(indexFile, record, toIndexRecord = item 
 }
 
 export async function findRecordById(dirPath, indexFile, id) {
+  assertSafePathSegment(id, 'record id');
   const markdownDir = markdownMirrorDir(dirPath);
   if (markdownDir) {
     const markdownFiles = await readDirRecursive(markdownDir, { filter: filePath => filePath.endsWith('.md') });
@@ -109,7 +117,7 @@ export async function findRecordById(dirPath, indexFile, id) {
       }
     }
   }
-  const filePath = path.join(dirPath, `${id}.json`);
+  const filePath = await resolveRecordJsonPath(dirPath, id, PATH_POLICIES.MEMORY_READ);
   try {
     return await readJsonFile(filePath);
   } catch {
@@ -119,6 +127,8 @@ export async function findRecordById(dirPath, indexFile, id) {
 }
 
 export async function persistRecord(dirPath, indexFile, record, toIndexRecord = item => item) {
+  assertSafePathSegment(record?.id, 'record id');
+  if (record?.kind) assertSafePathSegment(record.kind, 'record kind', { allowDot: false });
   const markdownPath = await mirrorRecordToMarkdown(record);
   if (markdownPath) {
     record.paths = {
@@ -161,7 +171,7 @@ function markdownPageToRecord(frontmatter, filePath) {
     sourceRawItemIds: frontmatter.sourceRefs || [],
     createdAt: frontmatter.createdAt || frontmatter.created_at || null,
     updatedAt: frontmatter.updatedAt || frontmatter.updated_at || null,
-    paths: { self: filePath.replace(/^.*\/memory\//, 'memory/') },
+    paths: { self: path.relative(memoryRoot, filePath) },
   };
   if (frontmatter.description !== undefined) record.description = frontmatter.description;
   if (frontmatter.why !== undefined) record.why = frontmatter.why;

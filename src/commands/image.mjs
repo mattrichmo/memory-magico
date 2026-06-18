@@ -7,6 +7,7 @@ import { makeId } from '../core/ids.mjs';
 import { appendJsonl } from '../core/json.mjs';
 import { maybeSpoolJsonResult, spoolResult } from '../core/result-spool.mjs';
 import { writeJsonOutput } from '../core/renderers.mjs';
+import { withLock } from '../core/lock.mjs';
 
 const rawFile = path.join(memoryRoot, 'inbox', 'raw-items.jsonl');
 const assetRoot = path.join(memoryRoot, 'inbox', 'raw', 'assets');
@@ -18,10 +19,21 @@ function parseFlagNumber(argv, flag, fallback) {
   return Number.isFinite(value) && value >= 0 ? value : fallback;
 }
 
-async function storeImage(filepath, { title = null, source = 'file' } = {}) {
+async function storeImage(filepath, { title = null, source = 'file', maxBytes = 262144, allowLarge = false } = {}) {
   const absSource = resolveExternalSourcePath(filepath);
-  const buffer = await fs.readFile(absSource);
-  const mediaType = detectBinaryType(buffer);
+  const stat = await fs.stat(absSource);
+  if (stat.size > maxBytes && !allowLarge) {
+    throw new Error(`Refusing ${filepath}: ${stat.size} bytes exceeds --max-bytes ${maxBytes}. Pass --allow-large to override.`);
+  }
+  const handle = await fs.open(absSource, 'r');
+  let mediaType = null;
+  try {
+    const buffer = Buffer.alloc(Math.min(stat.size, 4096));
+    const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
+    mediaType = detectBinaryType(buffer.slice(0, bytesRead));
+  } finally {
+    await handle.close();
+  }
   if (!mediaType || !mediaType.startsWith('image/')) {
     throw new Error(`Unsupported image file: ${filepath}`);
   }
@@ -41,7 +53,7 @@ async function storeImage(filepath, { title = null, source = 'file' } = {}) {
     path: `memory/inbox/raw/assets/${filename}`,
     sourceRef: filepath,
     mediaType,
-    byteSize: buffer.length,
+    byteSize: stat.size,
     source,
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
@@ -94,6 +106,27 @@ export async function run(argv = []) {
     if (!target) return console.log('Usage: mm image encode <path> [--json]');
     const abs = await resolveExternalSourcePath(target);
     const maxChars = parseFlagNumber(argv, '--max-bytes', 256 * 1024);
+    const allowLarge = argv.includes('--allow-large');
+    const stat = await fs.stat(abs);
+    if (stat.size > maxChars && !allowLarge) {
+      console.log(`Refusing ${target}: ${stat.size} bytes exceeds --max-bytes ${maxChars}. Pass --allow-large to override.`);
+      process.exitCode = 2;
+      return;
+    }
+    const handle = await fs.open(abs, 'r');
+    let mediaType = null;
+    try {
+      const buffer = Buffer.alloc(Math.min(stat.size, 4096));
+      const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
+      mediaType = detectBinaryType(buffer.slice(0, bytesRead));
+    } finally {
+      await handle.close();
+    }
+    if (!mediaType || !mediaType.startsWith('image/')) {
+      console.log(`Unsupported image file: ${target}`);
+      process.exitCode = 2;
+      return;
+    }
     const buffer = await fs.readFile(abs);
     const payload = {
       ok: true,
@@ -115,7 +148,9 @@ export async function run(argv = []) {
   }
   if (sub === 'add') {
     if (!target) return console.log('Usage: mm image add <path>');
-    const item = await storeImage(target, {});
+    const maxBytes = parseFlagNumber(argv, '--max-bytes', 256 * 1024);
+    const allowLarge = argv.includes('--allow-large');
+    const item = await withLock('repo-write', () => storeImage(target, { maxBytes, allowLarge }), { command: 'mm image add' });
     if (argv.includes('--json')) {
       writeJsonOutput({ ok: true, item });
       return;

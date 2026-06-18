@@ -2,9 +2,11 @@ import path from 'path';
 import { memoryRoot } from '../core/paths.mjs';
 import { makeId, slugify } from '../core/ids.mjs';
 import { readJsonFile, writeJsonFile } from '../core/json.mjs';
-import { findRecordById, listRecordsWithIndexFallback, upsertIndexRecord } from '../core/records.mjs';
+import { findRecordById, listRecordsWithIndexFallback, resolveRecordJsonPath, upsertIndexRecord } from '../core/records.mjs';
 import { parseArgs, splitList } from '../core/cli.mjs';
 import { assertSafePathSegment } from '../core/safe-path.mjs';
+import { ENUMS, assertEnum } from '../core/guards.mjs';
+import { writeJsonOutput } from '../core/renderers.mjs';
 
 const indexFile = path.join(memoryRoot, 'work', 'containers', 'index.jsonl');
 const containerRoot = path.join(memoryRoot, 'work', 'containers');
@@ -24,6 +26,7 @@ function toIndexRecord(item) {
 
 export async function run(argv) {
   const sub = argv[1] || 'list';
+  const json = argv.includes('--json');
   if (sub === 'create') {
     const opts = parseArgs(argv, 2);
     const title = opts._.join(' ').trim();
@@ -35,6 +38,8 @@ export async function run(argv) {
     const domain = opts.domain || slugify(title).replace(/^container-/, '') || 'general';
     const id = opts.id || `container_${domain}`;
     assertSafePathSegment(id, 'container id');
+    const status = opts.status || 'active';
+    assertEnum(status, ENUMS.containerStatus, 'container status');
     const item = {
       id,
       kind: 'container',
@@ -42,7 +47,7 @@ export async function run(argv) {
       description: opts.description || title,
       domain,
       category: opts.category || '',
-      status: opts.status || 'active',
+      status,
       closePolicy: opts['close-policy'] || 'long_lived',
       tags: splitList(opts.tags),
       owner: opts.owner || '',
@@ -50,14 +55,24 @@ export async function run(argv) {
       createdAt: now,
       updatedAt: now
     };
-    await writeJsonFile(path.join(containerRoot, `${id}.json`), item);
+    const file = await resolveRecordJsonPath(containerRoot, id, 'memory-write');
+    item.paths.self = path.relative(memoryRoot, file).split(path.sep).join('/');
+    await writeJsonFile(file, item);
     await upsertIndexRecord(indexFile, item, toIndexRecord);
+    if (json) {
+      writeJsonOutput({ ok: true, item });
+      return;
+    }
     console.log('Created container:', id);
     return;
   }
 
   if (sub === 'list') {
     const items = await listRecordsWithIndexFallback(containerRoot, indexFile, item => item.kind === 'container');
+    if (json) {
+      writeJsonOutput({ ok: true, items });
+      return;
+    }
     if (!items.length) {
       console.log('No containers found.');
       return;
@@ -72,13 +87,16 @@ export async function run(argv) {
       console.log('Usage: mm container show <id>');
       return;
     }
-    try {
-      const item = await findRecordById(containerRoot, indexFile, id);
-      if (!item) throw new Error('not found');
-      console.log(JSON.stringify(item, null, 2));
-    } catch {
+    const item = await findRecordById(containerRoot, indexFile, id);
+    if (!item) {
       console.log('Container not found:', id);
+      return;
     }
+    if (json) {
+      writeJsonOutput({ ok: true, item });
+      return;
+    }
+    console.log(JSON.stringify(item, null, 2));
     return;
   }
 
@@ -89,16 +107,29 @@ export async function run(argv) {
       console.log('Usage: mm container update <id> <status>');
       return;
     }
-    const file = path.join(containerRoot, `${id}.json`);
+    assertEnum(status, ENUMS.containerStatus, 'container status');
+    const file = await resolveRecordJsonPath(containerRoot, id, 'memory-write');
     try {
       const item = await readJsonFile(file);
       item.status = status;
       item.updatedAt = new Date().toISOString();
+      item.paths = {
+        ...(item.paths || {}),
+        self: path.relative(memoryRoot, file).split(path.sep).join('/'),
+      };
       await writeJsonFile(file, item);
       await upsertIndexRecord(indexFile, item, toIndexRecord);
+      if (json) {
+        writeJsonOutput({ ok: true, item });
+        return;
+      }
       console.log('Updated container:', id);
-    } catch {
-      console.log('Container not found:', id);
+    } catch (err) {
+      if (err?.code === 'ENOENT') {
+        console.log('Container not found:', id);
+        return;
+      }
+      throw err;
     }
     return;
   }
@@ -109,16 +140,28 @@ export async function run(argv) {
       console.log('Usage: mm container archive <id>');
       return;
     }
-    const file = path.join(containerRoot, `${id}.json`);
+    const file = await resolveRecordJsonPath(containerRoot, id, 'memory-write');
     try {
       const item = await readJsonFile(file);
       item.status = 'archived';
       item.updatedAt = new Date().toISOString();
+      item.paths = {
+        ...(item.paths || {}),
+        self: path.relative(memoryRoot, file).split(path.sep).join('/'),
+      };
       await writeJsonFile(file, item);
       await upsertIndexRecord(indexFile, item, toIndexRecord);
+      if (json) {
+        writeJsonOutput({ ok: true, item });
+        return;
+      }
       console.log('Archived container:', id);
-    } catch {
-      console.log('Container not found:', id);
+    } catch (err) {
+      if (err?.code === 'ENOENT') {
+        console.log('Container not found:', id);
+        return;
+      }
+      throw err;
     }
     return;
   }

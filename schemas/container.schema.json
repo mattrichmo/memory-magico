@@ -1,17 +1,38 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://memorymagico.local/schemas/container.schema.json",
-  "title": "MemoryMagico Container Frontmatter",
-  "description": "Canonical markdown frontmatter for a container page.",
+  "title": "MemoryMagico Container",
+  "description": "Canonical container record stored as JSON.",
   "type": "object",
-  "additionalProperties": true,
-  "required": ["id", "kind", "title", "status", "createdAt", "updatedAt"],
+  "additionalProperties": false,
+  "required": ["id", "kind", "title", "status", "paths", "createdAt", "updatedAt"],
   "properties": {
-    "id": { "type": "string" },
+    "id": { "type": "string", "pattern": "^container_[a-z0-9][a-z0-9_-]*$" },
     "kind": { "const": "container" },
-    "title": { "type": "string" },
-    "status": { "type": "string" },
-    "createdAt": { "type": "string" },
-    "updatedAt": { "type": "string" }
+    "title": { "type": "string", "minLength": 1 },
+    "description": { "type": ["string", "null"] },
+    "domain": { "type": ["string", "null"] },
+    "category": { "type": ["string", "null"] },
+    "status": {
+      "enum": ["active", "archived", "closed", "draft", "paused"]
+    },
+    "closePolicy": { "type": ["string", "null"] },
+    "tags": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "uniqueItems": true,
+      "default": []
+    },
+    "owner": { "type": ["string", "null"] },
+    "paths": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["self"],
+      "properties": {
+        "self": { "type": "string", "minLength": 1 }
+      }
+    },
+    "createdAt": { "type": "string", "format": "date-time" },
+    "updatedAt": { "type": "string", "format": "date-time" }
   }
 }

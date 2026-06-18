@@ -6,6 +6,7 @@ import { appendHistory } from '../core/history.mjs';
 import { findRecordById, listRecords, listRecordsWithIndexFallback, persistRecord } from '../core/records.mjs';
 import { parseArgs, splitList } from '../core/cli.mjs';
 import { ENUMS, assertEnum, assertEntityExists, assertEntityListExists, assertMeaningfulList } from '../core/guards.mjs';
+import { writeJsonOutput } from '../core/renderers.mjs';
 
 const indexFile = path.join(memoryRoot, 'work', 'phases', 'index.jsonl');
 const phaseRoot = path.join(memoryRoot, 'work', 'phases');
@@ -79,6 +80,7 @@ async function persistPhase(item) {
 
 export async function run(argv) {
   const sub = argv[1] || 'list';
+  const json = argv.includes('--json');
 
   if (sub === 'create') {
     const item = await createPhase(parseArgs(argv, 2));
@@ -86,6 +88,10 @@ export async function run(argv) {
     await assertEntityExists(item.sprintId, 'sprint', 'sprint');
     await assertEntityListExists(item.issueIds, 'issue', 'issue');
     await persistPhase(item);
+    if (json) {
+      writeJsonOutput({ ok: true, item });
+      return;
+    }
     console.log('Created phase:', item.id);
     return;
   }
@@ -98,6 +104,10 @@ export async function run(argv) {
       if (opts['sprint-id'] && item.sprintId !== opts['sprint-id']) return false;
       return true;
     });
+    if (json) {
+      writeJsonOutput({ ok: true, items: filtered });
+      return;
+    }
     if (!filtered.length) {
       console.log('No phases found.');
       return;
@@ -115,6 +125,10 @@ export async function run(argv) {
     const phase = await loadPhase(id);
     if (!phase) {
       console.log('Phase not found:', id);
+      return;
+    }
+    if (json) {
+      writeJsonOutput({ ok: true, item: phase });
       return;
     }
     console.log(JSON.stringify(phase, null, 2));
@@ -159,6 +173,10 @@ export async function run(argv) {
     await assertEntityExists(phase.sprintId, 'sprint', 'sprint');
     await assertEntityListExists(phase.issueIds, 'issue', 'issue');
     await persistPhase(phase);
+    if (json) {
+      writeJsonOutput({ ok: true, item: phase });
+      return;
+    }
     console.log('Updated phase:', id);
     return;
   }

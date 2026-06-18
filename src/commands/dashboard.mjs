@@ -6,15 +6,32 @@ import { parseArgs } from '../core/cli.mjs';
 import { memoryRoot, toolRoot } from '../core/paths.mjs';
 import { buildDashboardData } from '../core/dashboard-data.mjs';
 import { writeJsonFile } from '../core/json.mjs';
+import { listRecords, readLatestIndex } from '../core/records.mjs';
+import { pageIndexRows, scanMarkdownPages } from '../core/pages.mjs';
+import { findEntityRecord } from '../core/entities.mjs';
+import { resolveEntity, search } from '../core/retrieval.mjs';
+import { readGitDiff, readGitLog, readGitStatus as readGitStatusCore } from '../core/git.mjs';
+import { withLock } from '../core/lock.mjs';
 
 const dashboardRoot = path.join(toolRoot, 'dashboard');
 const defaultPort = 4317;
+const gitStatusTtlMs = 5000;
+let gitStatusCache = null;
+let gitStatusCacheAt = 0;
 const mimeTypes = {
   '.html': 'text/html; charset=utf-8',
   '.css': 'text/css; charset=utf-8',
   '.js': 'application/javascript; charset=utf-8',
   '.json': 'application/json; charset=utf-8',
   '.svg': 'image/svg+xml',
+};
+
+const roots = {
+  issues: path.join(memoryRoot, 'work', 'issues'),
+  raw: path.join(memoryRoot, 'inbox', 'raw-items.jsonl'),
+  discoveries: path.join(memoryRoot, 'work', 'discoveries'),
+  wiki: path.join(memoryRoot, 'wiki'),
+  graph: path.join(memoryRoot, 'issues', 'relationships.jsonl'),
 };
 
 function contentType(filePath) {
@@ -36,10 +53,7 @@ function maybeOpenBrowser(url) {
     args = [url];
   }
   try {
-    const child = spawn(command, args, {
-      detached: true,
-      stdio: 'ignore',
-    });
+    const child = spawn(command, args, { detached: true, stdio: 'ignore' });
     child.unref();
   } catch {
     // Ignore browser-open failures. The command still prints the URL.
@@ -47,28 +61,188 @@ function maybeOpenBrowser(url) {
 }
 
 function sendJson(res, statusCode, payload) {
-  res.writeHead(statusCode, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
+  res.writeHead(statusCode, {
+    'Content-Type': 'application/json; charset=utf-8',
+    'Cache-Control': 'no-store',
+  });
   res.end(JSON.stringify(payload, null, 2));
 }
 
-async function serveStatic(reqPath, res) {
-  const relative = reqPath === '/' ? 'index.html' : reqPath.replace(/^\/+/, '');
+function sendText(res, statusCode, body) {
+  res.writeHead(statusCode, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' });
+  res.end(body);
+}
+
+function normalizePathname(urlPath) {
+  try {
+    return decodeURIComponent(urlPath || '/');
+  } catch {
+    return null;
+  }
+}
+
+export async function serveStatic(reqPath, res) {
+  const decoded = normalizePathname(reqPath);
+  if (!decoded) {
+    sendText(res, 400, 'Bad request');
+    return;
+  }
+  const relative = decoded === '/' ? 'index.html' : decoded.replace(/^\/+/, '');
   const filePath = path.join(dashboardRoot, relative);
-  const normalized = path.normalize(filePath);
-  if (!normalized.startsWith(dashboardRoot)) {
-    res.writeHead(403);
-    res.end('Forbidden');
+  const resolved = path.resolve(filePath);
+  const outside = path.relative(dashboardRoot, resolved);
+  if (outside.startsWith('..') || path.isAbsolute(outside)) {
+    sendText(res, 403, 'Forbidden');
     return;
   }
 
   try {
-    const body = await fs.readFile(normalized);
-    res.writeHead(200, { 'Content-Type': contentType(normalized), 'Cache-Control': 'no-store' });
+    const body = await fs.readFile(resolved);
+    res.writeHead(200, { 'Content-Type': contentType(resolved), 'Cache-Control': 'no-store' });
     res.end(body);
   } catch {
-    res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
-    res.end('Not found');
+    sendText(res, 404, 'Not found');
   }
+}
+
+async function readGitStatus() {
+  const now = Date.now();
+  if (gitStatusCache && now - gitStatusCacheAt < gitStatusTtlMs) {
+    return gitStatusCache;
+  }
+  const status = await readGitStatusCore();
+  gitStatusCache = status;
+  gitStatusCacheAt = now;
+  return status;
+}
+
+async function loadWikiPage(id) {
+  const pages = await scanMarkdownPages([roots.wiki]);
+  return pages.find(page => page.id === id || page.path === id || page.slug === id) || null;
+}
+
+export async function handleApi(pathname, searchParams, res) {
+  if (pathname === '/api/dashboard') {
+    const payload = await buildDashboardData();
+    sendJson(res, 200, payload);
+    return;
+  }
+
+  if (pathname === '/api/health') {
+    sendJson(res, 200, {
+      ok: true,
+      generatedAt: new Date().toISOString(),
+      roots,
+    });
+    return;
+  }
+
+  if (pathname === '/api/issues') {
+    sendJson(res, 200, { ok: true, items: await listRecords(roots.issues) });
+    return;
+  }
+
+  if (pathname === '/api/raw') {
+    sendJson(res, 200, { ok: true, items: await readLatestIndex(roots.raw) });
+    return;
+  }
+
+  if (pathname === '/api/discoveries') {
+    sendJson(res, 200, { ok: true, items: await listRecords(roots.discoveries) });
+    return;
+  }
+
+  if (pathname === '/api/wiki') {
+    const pages = await scanMarkdownPages([roots.wiki]);
+    sendJson(res, 200, { ok: true, pages: pageIndexRows(pages) });
+    return;
+  }
+
+  if (pathname === '/api/graph') {
+    const edges = await readLatestIndex(roots.graph);
+    const node = searchParams.get('node');
+    const filtered = node ? edges.filter(edge => edge.from?.id === node || edge.to?.id === node) : edges;
+    sendJson(res, 200, { ok: true, edges: filtered });
+    return;
+  }
+
+  if (pathname === '/api/git/status') {
+    const status = await readGitStatus();
+    sendJson(res, 200, { ok: true, ...status });
+    return;
+  }
+
+  if (pathname === '/api/search') {
+    const q = (searchParams.get('q') || '').trim();
+    if (!q) {
+      sendJson(res, 400, { ok: false, error: { code: 'MISSING_QUERY', message: 'Missing q parameter.' } });
+      return;
+    }
+    const limit = Number(searchParams.get('limit') || 10) || 10;
+    const mode = searchParams.get('mode') || 'hybrid';
+    const kind = searchParams.get('kind') || null;
+    const results = await search(q, { kind, limit, mode, includeBody: true });
+    sendJson(res, 200, { ok: true, query: q, results });
+    return;
+  }
+
+  if (pathname === '/api/resolve') {
+    const q = (searchParams.get('q') || '').trim();
+    if (!q) {
+      sendJson(res, 400, { ok: false, error: { code: 'MISSING_QUERY', message: 'Missing q parameter.' } });
+      return;
+    }
+    const kind = searchParams.get('kind') || null;
+    const limit = Number(searchParams.get('limit') || 5) || 5;
+    const results = await resolveEntity(q, { kind, limit });
+    sendJson(res, 200, { ok: true, query: q, results });
+    return;
+  }
+
+  if (pathname.startsWith('/api/entity/')) {
+    const [, , , kindRaw, ...idParts] = pathname.split('/');
+    const kind = kindRaw || '';
+    const id = idParts.join('/');
+    if (!kind || !id) {
+      sendJson(res, 400, { ok: false, error: { code: 'MISSING_ENTITY', message: 'Missing entity kind or id.' } });
+      return;
+    }
+    if (kind === 'wiki' || kind === 'wiki_page') {
+      const page = await loadWikiPage(id);
+      if (!page) {
+        sendJson(res, 404, { ok: false, error: { code: 'NOT_FOUND', message: `No wiki page found for ${id}.` } });
+        return;
+      }
+      sendJson(res, 200, { ok: true, entity: page });
+      return;
+    }
+    const lookupKind = kind === 'raw' ? 'raw_item' : kind;
+    const entity = await findEntityRecord(id, lookupKind);
+    if (!entity) {
+      sendJson(res, 404, { ok: false, error: { code: 'NOT_FOUND', message: `No entity found for ${kind}/${id}.` } });
+      return;
+    }
+    sendJson(res, 200, { ok: true, entity });
+    return;
+  }
+
+  if (pathname === '/api/git/log') {
+    const target = searchParams.get('path') || null;
+    const limit = Number(searchParams.get('limit') || 20) || 20;
+    const log = await readGitLog(target, limit);
+    sendJson(res, 200, { ok: true, path: target, log });
+    return;
+  }
+
+  if (pathname === '/api/git/diff') {
+    const target = searchParams.get('path') || null;
+    const memoryOnly = searchParams.get('memory') === '1' || searchParams.get('memory') === 'true';
+    const diff = await readGitDiff({ path: target, memoryOnly });
+    sendJson(res, 200, { ok: true, path: target, diff });
+    return;
+  }
+
+  sendJson(res, 404, { ok: false, error: { code: 'NOT_FOUND', message: 'Unknown dashboard API route.' } });
 }
 
 export async function run(argv) {
@@ -77,8 +251,11 @@ export async function run(argv) {
 
   if (sub === 'build') {
     const outFile = path.join(memoryRoot, 'generated', 'dashboard.json');
-    const payload = await buildDashboardData();
-    await writeJsonFile(outFile, payload);
+    const payload = await withLock('repo-write', async () => {
+      const next = await buildDashboardData();
+      await writeJsonFile(outFile, next);
+      return next;
+    }, { command: 'mm dashboard build' });
     console.log(`Built dashboard snapshot: ${path.relative(toolRoot, outFile)}`);
     return;
   }
@@ -88,18 +265,33 @@ export async function run(argv) {
   const noOpen = Boolean(opts['no-open']);
   const url = `http://${host}:${port}`;
 
+  if (host !== '127.0.0.1') {
+    console.warn(`Warning: dashboard is binding to ${host}. This may expose local memory data on your network.`);
+  }
+
   const server = http.createServer(async (req, res) => {
-    const reqPath = (req.url || '/').split('?')[0];
-    if (reqPath === '/api/dashboard') {
+    const requestUrl = new URL(req.url || '/', `http://${host}:${port}`);
+    const pathname = normalizePathname(requestUrl.pathname);
+    if (!pathname) {
+      sendText(res, 400, 'Bad request');
+      return;
+    }
+    if (pathname.startsWith('/api/')) {
       try {
-        const payload = await buildDashboardData();
-        sendJson(res, 200, payload);
+        await handleApi(pathname, requestUrl.searchParams, res);
       } catch (error) {
-        sendJson(res, 500, { error: error.message });
+        const statusCode = error?.code === 'PATH_OUTSIDE_MEMORY_ROOT' || error?.code === 'INVALID_ARGUMENT' ? 400 : 500;
+        sendJson(res, statusCode, {
+          ok: false,
+          error: {
+            code: error?.code || 'INTERNAL_ERROR',
+            message: error?.message || 'Dashboard API request failed.',
+          },
+        });
       }
       return;
     }
-    await serveStatic(reqPath, res);
+    await serveStatic(pathname, res);
   });
 
   server.on('error', error => {
@@ -108,8 +300,11 @@ export async function run(argv) {
   });
 
   server.listen(port, host, () => {
-    console.log(`MemoryMagico dashboard running at ${url}`);
+    const address = server.address();
+    const actualPort = typeof address === 'object' && address ? address.port : port;
+    const actualUrl = `http://${host}:${actualPort}`;
+    console.log(`MemoryMagico dashboard running at ${actualUrl}`);
     console.log('Press Ctrl+C to stop.');
-    if (!noOpen) maybeOpenBrowser(url);
+    if (!noOpen) maybeOpenBrowser(actualUrl);
   });
 }

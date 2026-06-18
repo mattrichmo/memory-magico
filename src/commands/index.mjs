@@ -2,19 +2,21 @@ import path from 'path';
 import fs from 'fs/promises';
 import { memoryRoot } from '../core/paths.mjs';
 import { rebuildIndex, searchStatus } from '../core/retrieval.mjs';
+import { writeJsonOutput } from '../core/renderers.mjs';
 
 export async function run(argv) {
   const sub = argv[1] || 'status';
   if (sub === 'rebuild') {
     const index = await rebuildIndex();
     if (argv.includes('--json')) {
-      console.log(JSON.stringify({
+      writeJsonOutput({
+        ok: true,
         builtAt: index.builtAt,
         pageCount: index.pageCount,
         chunkCount: index.chunkCount,
         mode: index.mode,
         vectorDims: index.vectorDims,
-      }, null, 2));
+      });
       return;
     }
     console.log(`Search index rebuilt: ${index.pageCount} pages, ${index.chunkCount} chunks.`);
@@ -24,7 +26,7 @@ export async function run(argv) {
   if (sub === 'status') {
     const status = await searchStatus();
     if (argv.includes('--json')) {
-      console.log(JSON.stringify(status, null, 2));
+      writeJsonOutput({ ok: true, ...status });
       return;
     }
     console.log(`Search index: ${status.ready ? 'ready' : 'needs rebuild'}`);
@@ -41,8 +43,23 @@ export async function run(argv) {
   if (sub === 'show') {
     const file = path.join(memoryRoot, 'generated', 'search-index.json');
     try {
-      console.log(await fs.readFile(file, 'utf8'));
+      const text = await fs.readFile(file, 'utf8');
+      if (argv.includes('--json')) {
+        writeJsonOutput({ ok: true, index: JSON.parse(text) });
+        return;
+      }
+      console.log(text);
     } catch {
+      if (argv.includes('--json')) {
+        writeJsonOutput({
+          ok: false,
+          error: {
+            code: 'MISSING_INDEX',
+            message: 'Search index not found. Run `mm index rebuild`.',
+          },
+        });
+        return;
+      }
       console.log('Search index not found. Run `mm index rebuild`.');
     }
     return;

@@ -6,6 +6,7 @@ import { appendHistory } from '../core/history.mjs';
 import { findRecordById, listRecordsWithIndexFallback, persistRecord } from '../core/records.mjs';
 import { parseArgs, splitList } from '../core/cli.mjs';
 import { ENUMS, assertEnum, assertEntityListExists, assertMeaningfulList } from '../core/guards.mjs';
+import { writeJsonOutput } from '../core/renderers.mjs';
 
 const indexFile = path.join(memoryRoot, 'work', 'sprints', 'index.jsonl');
 const sprintRoot = path.join(memoryRoot, 'work', 'sprints');
@@ -79,6 +80,7 @@ async function persistSprint(item) {
 
 export async function run(argv) {
   const sub = argv[1] || 'list';
+  const json = argv.includes('--json');
 
   if (sub === 'create') {
     const sprint = createSprint(parseArgs(argv, 2));
@@ -90,6 +92,10 @@ export async function run(argv) {
     await assertEntityListExists(sprint.initiativeIds, 'initiative', 'initiative');
     await assertEntityListExists(sprint.issueIds, 'issue', 'issue');
     await persistSprint(sprint);
+    if (json) {
+      writeJsonOutput({ ok: true, item: sprint });
+      return;
+    }
     console.log('Created sprint:', sprint.id);
     return;
   }
@@ -98,6 +104,10 @@ export async function run(argv) {
     const opts = parseArgs(argv, 2);
     const items = await listRecordsWithIndexFallback(sprintRoot, indexFile);
     const filtered = items.filter(item => !opts.status || item.status === opts.status);
+    if (json) {
+      writeJsonOutput({ ok: true, items: filtered });
+      return;
+    }
     if (!filtered.length) {
       console.log('No sprints found.');
       return;
@@ -115,6 +125,10 @@ export async function run(argv) {
     const sprint = await loadSprint(id);
     if (!sprint) {
       console.log('Sprint not found:', id);
+      return;
+    }
+    if (json) {
+      writeJsonOutput({ ok: true, item: sprint });
       return;
     }
     console.log(JSON.stringify(sprint, null, 2));
@@ -164,6 +178,10 @@ export async function run(argv) {
     await assertEntityListExists(sprint.initiativeIds, 'initiative', 'initiative');
     await assertEntityListExists(sprint.issueIds, 'issue', 'issue');
     await persistSprint(sprint);
+    if (json) {
+      writeJsonOutput({ ok: true, item: sprint });
+      return;
+    }
     console.log('Updated sprint:', id);
     return;
   }

@@ -1,9 +1,35 @@
 import { getCommand } from '../core/command-registry.mjs';
 import { COMMAND_HANDLERS } from '../core/command-handlers.mjs';
 import { withJsonStdoutGuard } from '../core/stdout-guard.mjs';
-import { toMemoryMagicoError, UnknownCommandError } from '../core/errors.mjs';
+import { toMemoryMagicoError, UnknownCommandError, UnsupportedJsonOutputError } from '../core/errors.mjs';
 import { writeJsonOutput } from '../core/renderers.mjs';
+import { withLock } from '../core/lock.mjs';
 import { indexStatus, rebuildIndex } from '../core/retrieval.mjs';
+
+const WORKSPACE_WRITE_COMMANDS = new Set([
+  'add',
+  'capture',
+  'claim',
+  'comment',
+  'container',
+  'discovery',
+  'frontmatter',
+  'graph',
+  'index',
+  'initiative',
+  'issue',
+  'ledger',
+  'migrate',
+  'phase',
+  'raw',
+  'repair',
+  'snapshot',
+  'sprint',
+  'task',
+  'wiki',
+  'ingest',
+  'init',
+]);
 
 export async function run(argv) {
   const cmd = argv[0] || 'help';
@@ -23,10 +49,18 @@ export async function run(argv) {
         await rebuildIndex();
       }
     }
+    if (WORKSPACE_WRITE_COMMANDS.has(command.name)) {
+      return withLock('repo-write', () => handler(argv), {
+        command: `mm ${argv.join(' ')}`,
+      });
+    }
     return handler(argv);
   };
 
   try {
+    if (wantsJson && command && !command.supportsJson) {
+      throw new UnsupportedJsonOutputError(`Command ${command.name} does not support --json.`);
+    }
     return wantsJson ? await withJsonStdoutGuard(exec) : await exec();
   } catch (err) {
     const mmErr = toMemoryMagicoError(err);

@@ -15,8 +15,9 @@ export async function writeJsonFile(filePath, obj) {
 
 export async function readJsonFile(filePath) {
   const txt = await fs.readFile(filePath, 'utf8');
-  const parsed = safeParseJson(txt, undefined);
-  if (parsed === undefined && String(txt || '').trim() !== 'null') {
+  const invalid = Symbol('invalid-json');
+  const parsed = safeParseJson(txt, invalid);
+  if (parsed === invalid) {
     throw new Error(`Malformed JSON: ${filePath}`);
   }
   return parsed;

@@ -7,16 +7,24 @@
     "memorymagico": "./bin/mm.mjs"
   },
   "scripts": {
+    "mm": "node ./bin/mm.mjs",
+    "dashboard": "node ./bin/mm.mjs dashboard",
+    "dashboard:build": "node ./bin/mm.mjs dashboard build",
+    "dashboard:serve": "node ./bin/mm.mjs dashboard serve --no-open",
+    "setup": "node ./bin/mm.mjs setup",
     "doctor": "node ./bin/mm.mjs doctor",
     "index": "node ./bin/mm.mjs index rebuild",
     "smoke": "node ./scripts/smoke-test.mjs",
-    "test": "node --test"
+    "test": "node --test --test-concurrency=1"
   },
   "engines": {
     "node": ">=20"
   },
   "files": [
     "bin/",
+    "dashboard/",
+    "memory/",
+    "mm",
     "src/",
     "schemas/",
     "docs/internal/",

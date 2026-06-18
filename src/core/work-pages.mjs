@@ -1,8 +1,9 @@
 import path from 'path';
 import { memoryRoot } from './paths.mjs';
 import { mkdirp } from './fs.mjs';
-import { slugify } from './slugs.mjs';
 import { writeMarkdownPage } from './frontmatter.mjs';
+import { assertSafePathSegment, isInsidePath, resolveContainedPath } from './safe-path.mjs';
+import { PATH_POLICIES } from './path-policies.mjs';
 
 const KIND_DIRS = {
   initiative: ['work', 'initiatives'],
@@ -44,7 +45,8 @@ function bodyForRecord(record) {
   return sections.join('\n') + '\n';
 }
 
-function frontmatterForRecord(record) {
+function frontmatterForRecord(record, filePath = null) {
+  const selfPath = filePath ? path.relative(memoryRoot, filePath).split(path.sep).join('/') : record?.paths?.self || null;
   return {
     id: record.id,
     kind: record.kind || 'note',
@@ -75,6 +77,9 @@ function frontmatterForRecord(record) {
     confidence: record.confidence || null,
     risk: record.risk || null,
     dependencies: record.dependencies || null,
+    paths: {
+      self: selfPath,
+    },
   };
 }
 
@@ -83,7 +88,23 @@ export async function mirrorRecordToMarkdown(record) {
   if (!rel) return null;
   const dir = path.join(memoryRoot, ...rel);
   await mkdirp(dir);
-  const file = path.join(dir, `${slugify(record.title || record.id)}.md`);
-  await writeMarkdownPage(file, frontmatterForRecord(record), bodyForRecord(record));
+  const safeId = assertSafePathSegment(record?.id, 'record id');
+  const existingSelf = record?.paths?.self;
+  let file = null;
+  if (existingSelf) {
+    try {
+      const normalizedSelf = String(existingSelf).replace(/^memory\//, '');
+      const resolved = await resolveContainedPath(memoryRoot, normalizedSelf, PATH_POLICIES.MEMORY_WRITE);
+      if (isInsidePath(dir, resolved) && resolved.endsWith('.md')) {
+        file = resolved;
+      }
+    } catch {
+      file = null;
+    }
+  }
+  if (!file) {
+    file = path.join(dir, `${safeId}.md`);
+  }
+  await writeMarkdownPage(file, frontmatterForRecord(record, file), bodyForRecord(record));
   return file;
 }

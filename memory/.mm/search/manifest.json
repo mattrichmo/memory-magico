@@ -1,12 +1,73 @@
 {
-  "version": 1,
-  "builtAt": "2026-06-18T04:28:03.838Z",
+  "version": 2,
+  "builtAt": "2026-06-18T16:26:09.424Z",
   "mode": "hybrid",
-  "pageCount": 8,
-  "chunkCount": 40,
   "vectorDims": 2048,
+  "pageCount": 9,
+  "chunkCount": 37,
   "sourceRoots": [
-    "memory/wiki",
-    "memory/work"
-  ]
+    "wiki",
+    "work"
+  ],
+  "roots": {
+    "wiki": {
+      "root": "wiki",
+      "files": [
+        {
+          "path": "wiki/concepts/sentinel-1-radar-monitoring.md",
+          "mtimeMs": 1781714099955.5671,
+          "size": 312
+        },
+        {
+          "path": "wiki/index.md",
+          "mtimeMs": 1781714017148.287,
+          "size": 148
+        },
+        {
+          "path": "wiki/log.md",
+          "mtimeMs": 1781714099955.9912,
+          "size": 248
+        },
+        {
+          "path": "wiki/open-questions.md",
+          "mtimeMs": 1781714017149.0488,
+          "size": 45
+        },
+        {
+          "path": "wiki/overview.md",
+          "mtimeMs": 1781714017148.7449,
+          "size": 49
+        },
+        {
+          "path": "wiki/temp-tag-page.md",
+          "mtimeMs": 1781799969394.321,
+          "size": 257
+        }
+      ],
+      "pageCount": 6,
+      "chunkCount": 28
+    },
+    "work": {
+      "root": "work",
+      "files": [
+        {
+          "path": "work/initiatives/smoke-work.md",
+          "mtimeMs": 1781795761119.2764,
+          "size": 614
+        },
+        {
+          "path": "work/sprints/smoke-sprint.md",
+          "mtimeMs": 1781795761120.7944,
+          "size": 642
+        },
+        {
+          "path": "work/tasks/smoke-task.md",
+          "mtimeMs": 1781795761122.1526,
+          "size": 620
+        }
+      ],
+      "pageCount": 3,
+      "chunkCount": 9
+    }
+  }
 }

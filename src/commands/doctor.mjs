@@ -1,6 +1,7 @@
 import path from 'path';
 import { exists } from '../core/fs.mjs';
 import { memoryRoot } from '../core/paths.mjs';
+import { ensureWorkspaceStructure, writeWorkspaceStarterFiles } from '../core/workspace.mjs';
 import { writeJsonOutput } from '../core/renderers.mjs';
 
 const expected = [
@@ -24,6 +25,11 @@ const expected = [
 
 export async function run(argv = []) {
   const json = argv.includes('--json');
+  const fix = argv.includes('--fix');
+  if (fix) {
+    await ensureWorkspaceStructure();
+    await writeWorkspaceStarterFiles();
+  }
   if (!json) console.log('Running doctor checks...');
   const checks = [];
   let ok = true;

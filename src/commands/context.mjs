@@ -2,6 +2,7 @@ import { resolveEntity, search } from '../core/retrieval.mjs';
 import { maybeSpoolJsonResult } from '../core/result-spool.mjs';
 import { writeJsonOutput } from '../core/renderers.mjs';
 import { sanitizeSearchQuery } from '../core/string-safety.mjs';
+import { detectPromptMarkers } from '../core/prompt-markers.mjs';
 
 export async function run(argv) {
   const queryParts = [];
@@ -19,25 +20,37 @@ export async function run(argv) {
   const matches = await resolveEntity(query, { limit: 1 });
   if (!matches.length) {
     const fallback = await search(query, { limit: 5, includeBody: deep });
+    const warnings = detectPromptMarkers([
+      query,
+      ...fallback.flatMap(result => [result.title, result.heading, result.body]),
+    ]);
     if (argv.includes('--json')) {
-      const payload = await maybeSpoolJsonResult('context', { input: query, matches: fallback }, 30000);
+      const payload = await maybeSpoolJsonResult('context', { input: query, matches: fallback, warnings }, 30000);
       writeJsonOutput({ ok: true, ...payload.value });
       return;
     }
+    warnings.forEach(warning => console.log(`WARN ${warning}`));
     fallback.forEach(result => console.log(`${result.rank}. ${result.title} (${result.path})`));
     return;
   }
   const match = matches[0];
+  const warnings = detectPromptMarkers([
+    query,
+    match.title,
+    match.path,
+  ]);
   const payload = {
     input: query,
     resolved: match,
     related: deep ? await search(match.title, { limit: 8, includeBody: true }) : [],
+    warnings,
   };
   if (argv.includes('--json')) {
     const maybe = await maybeSpoolJsonResult('context', payload, 30000);
     writeJsonOutput({ ok: true, ...maybe.value });
     return;
   }
+  warnings.forEach(warning => console.log(`WARN ${warning}`));
   console.log(`${match.title} [${match.kind}]`);
   console.log(match.path);
   if (deep && payload.related.length) {

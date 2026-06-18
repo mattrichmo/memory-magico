@@ -4,6 +4,8 @@ import { makeId } from '../core/ids.mjs';
 import { findRecordById, listRecordsWithIndexFallback, persistRecord } from '../core/records.mjs';
 import { findEntityRecord, inferKindFromId, resolveNodeRef, entityRefExists } from '../core/entities.mjs';
 import { parseArgs, splitList } from '../core/cli.mjs';
+import { ENUMS, assertEnum } from '../core/guards.mjs';
+import { writeJsonOutput } from '../core/renderers.mjs';
 
 const commentRoot = path.join(memoryRoot, 'work', 'comments');
 const indexFile = path.join(commentRoot, 'index.jsonl');
@@ -70,6 +72,7 @@ async function persistComment(item) {
 
 export async function run(argv) {
   const sub = argv[1] || 'list';
+  const json = argv.includes('--json');
 
   if (sub === 'add' || sub === 'create') {
     const targetId = argv[2];
@@ -106,14 +109,23 @@ export async function run(argv) {
       createdAt: now,
       updatedAt: now,
     };
+    assertEnum(comment.reconciliationStatus, ENUMS.commentStatus, 'comment reconciliation status');
     if (!(await entityRefExists(comment.target))) throw new Error(`comment target not found: ${targetId}`);
     await persistComment(comment);
+    if (json) {
+      writeJsonOutput({ ok: true, item: comment });
+      return;
+    }
     console.log('Added comment:', comment.id);
     return;
   }
 
   if (sub === 'list') {
     const comments = await listRecordsWithIndexFallback(commentRoot, indexFile, item => item.kind === 'comment');
+    if (json) {
+      writeJsonOutput({ ok: true, items: comments });
+      return;
+    }
     if (!comments.length) {
       console.log('No comments found.');
       return;
@@ -131,6 +143,10 @@ export async function run(argv) {
     const comment = await loadComment(id);
     if (!comment) {
       console.log('Comment not found:', id);
+      return;
+    }
+    if (json) {
+      writeJsonOutput({ ok: true, item: comment });
       return;
     }
     console.log(JSON.stringify(comment, null, 2));

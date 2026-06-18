@@ -12,6 +12,7 @@ import { detectBinaryType } from '../core/binary-detect.mjs';
 import { maybeSpoolJsonResult } from '../core/result-spool.mjs';
 import { writeJsonOutput } from '../core/renderers.mjs';
 import { addRawImage } from './image.mjs';
+import { detectPromptMarkers } from '../core/prompt-markers.mjs';
 
 const rawFile = path.join(memoryRoot, 'inbox', 'raw-items.jsonl');
 const rawDir = path.join(memoryRoot, 'inbox', 'raw');
@@ -82,7 +83,7 @@ function makeTargetRef(kind, id, targetPath) {
   return ref;
 }
 
-async function reconcileRawItem(id, status, targetRefs = [], note) {
+async function reconcileRawItem(id, status, targetRefs = [], note, { json = false } = {}) {
   return withLock('raw-ingest', async () => {
     const items = await loadRawItems();
     const item = items.find(entry => entry.id === id);
@@ -122,12 +123,16 @@ async function reconcileRawItem(id, status, targetRefs = [], note) {
     }
 
     await appendJsonl(rawFile, updated);
-    console.log(`${status === 'rejected' ? 'Rejected' : 'Processed'} raw item:`, id);
+    if (!json) {
+      console.log(`${status === 'rejected' ? 'Rejected' : 'Processed'} raw item:`, id);
+    }
+    return updated;
   }, { command: `mm raw ${status}` });
 }
 
 export async function run(argv) {
   const sub = argv[1] || 'list';
+  const json = argv.includes('--json');
 
   if (sub === 'add') {
     return withLock('raw-ingest', async () => {
@@ -171,6 +176,10 @@ export async function run(argv) {
       };
 
       await appendJsonl(rawFile, item);
+      if (json) {
+        writeJsonOutput({ ok: true, item });
+        return;
+      }
       console.log('Added raw item:', id);
       console.log('Path:', relPath);
       return;
@@ -184,8 +193,10 @@ export async function run(argv) {
         console.log('Usage: mm raw add-image <filepath> [--json]');
         return;
       }
-      const item = await addRawImage(filepath, { source: 'file' });
-      if (argv.includes('--json')) {
+      const maxBytes = parseFlagNumber(argv, '--max-bytes', 256 * 1024);
+      const allowLarge = argv.includes('--allow-large');
+      const item = await addRawImage(filepath, { source: 'file', maxBytes, allowLarge });
+      if (json) {
         writeJsonOutput({ ok: true, item });
         return;
       }
@@ -244,15 +255,21 @@ export async function run(argv) {
     const maxLines = parseFlagNumber(argv, '--lines', 200);
     const binaryInfo = argv.includes('--binary-info');
     const preview = await loadRawPayloadPreview(item, { maxBytes, maxLines }).catch(() => null);
+    const warnings = detectPromptMarkers([
+      item.title,
+      item.summary,
+      preview?.binary ? '' : preview?.content,
+    ]);
 
     if (argv.includes('--json')) {
-      const payload = { ok: true, item };
+      const payload = { ok: true, item, warnings };
       if (preview) payload.payload = preview;
       const result = await maybeSpoolJsonResult('raw show', payload, 20000);
       writeJsonOutput(result.value);
       return;
     }
     console.log(JSON.stringify(item, null, 2));
+    warnings.forEach(warning => console.log(`WARN ${warning}`));
 
     if (!preview) return;
     console.log('\n--- Payload ---');
@@ -287,7 +304,11 @@ export async function run(argv) {
       normalizedTargetPath = path.relative(repoRoot, resolvedTargetPath).split(path.sep).join('/');
     }
     const targetRefs = targetKind && targetId ? [makeTargetRef(targetKind, targetId, normalizedTargetPath)] : [];
-    await reconcileRawItem(id, sub === 'reject' ? 'rejected' : 'processed', targetRefs, note);
+    const updated = await reconcileRawItem(id, sub === 'reject' ? 'rejected' : 'processed', targetRefs, note, { json });
+    if (json) {
+      writeJsonOutput({ ok: true, item: updated });
+      return;
+    }
     console.log('');
     console.log('Reminder: if a source file was added via `mm add <file>`, move or delete');
     console.log('the original from memory/inbox/raw/ so it cannot be re-ingested.');
@@ -309,6 +330,10 @@ export async function run(argv) {
     }
     const updated = { ...item, status: 'archived', updatedAt: new Date().toISOString() };
     await appendJsonl(rawFile, updated);
+    if (json) {
+      writeJsonOutput({ ok: true, item: updated });
+      return;
+    }
     console.log('Archived raw item:', id);
     return;
   }
@@ -339,11 +364,30 @@ export async function run(argv) {
     });
 
     if (!orphans.length) {
+      if (json) {
+        writeJsonOutput({ ok: true, orphanCount: 0, moved: [] });
+        return;
+      }
       console.log('No orphan source files found in memory/inbox/raw/. Inbox is clean.');
       return;
     }
 
+    if (json) {
+      const dryRun = argv.includes('--dry-run');
+      const moved = [];
+      for (const f of orphans) {
+        const from = path.join(rawDir, f);
+        const to = path.join(processedDir, f);
+        if (!dryRun) {
+          await fs.rename(from, to);
+          moved.push(`memory/inbox/processed/${f}`);
+        }
+      }
+      writeJsonOutput({ ok: true, orphanCount: orphans.length, moved, dryRun });
+      return;
+    }
     const dryRun = argv.includes('--dry-run');
+    const moved = [];
     console.log(`Found ${orphans.length} orphan source file(s)${dryRun ? ' (dry run — not moving)' : ''}:`);
     for (const f of orphans) {
       const from = path.join(rawDir, f);
@@ -351,6 +395,7 @@ export async function run(argv) {
       console.log(`  ${f}`);
       if (!dryRun) {
         await fs.rename(from, to);
+        moved.push(`memory/inbox/processed/${f}`);
       }
     }
     if (!dryRun) {

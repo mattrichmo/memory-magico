@@ -16,6 +16,7 @@ import path from 'path';
 import fs from 'fs/promises';
 import { repoRoot as workspaceRoot } from '../core/paths.mjs';
 import { withLock } from '../core/lock.mjs';
+import { validateRoleContract } from '../core/role-contracts.mjs';
 
 const rolesDir = path.join(workspaceRoot, 'memory', 'agents', 'roles');
 
@@ -91,6 +92,11 @@ async function loadRoles() {
       allowedTools: Array.isArray(fm.allowed_tools) ? fm.allowed_tools : [],
       forbiddenTools: Array.isArray(fm.forbidden_tools) ? fm.forbidden_tools : [],
     });
+
+    const contractFindings = validateRoleContract(roles[roles.length - 1]);
+    if (contractFindings.length) {
+      throw new Error(`Invalid role contract in ${agentPath}: ${contractFindings.join('; ')}`);
+    }
   }
 
   return roles.sort((a, b) => {
@@ -324,7 +330,7 @@ export async function run(argv) {
     process.exit(1);
   }
 
-  return withLock('install', async () => {
+  return withLock('repo-write', async () => {
     const allRoles = await loadRoles();
     if (!allRoles.length) {
       console.log('No roles found in memory/agents/roles/');

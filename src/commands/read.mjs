@@ -29,6 +29,7 @@ export async function run(argv = []) {
   const target = argv[1];
   if (!target) {
     console.log('Usage: mm read <path> [--offset N] [--lines N] [--max-bytes N] [--json] [--binary-info]');
+    console.log('Note: without --offset the preview is byte-bounded; with --offset the reader streams the requested line window.');
     return;
   }
 

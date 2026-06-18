@@ -31,6 +31,8 @@ function defineError(name, code, defaultMessage, exitCode = 2) {
 
 export const UnknownCommandError = defineError('UnknownCommandError', 'UNKNOWN_COMMAND', 'Unknown command.');
 export const InvalidArgumentError = defineError('InvalidArgumentError', 'INVALID_ARGUMENT', 'Invalid argument.');
+export const UnsupportedJsonOutputError = defineError('UnsupportedJsonOutputError', 'UNSUPPORTED_JSON_OUTPUT', 'This command does not support JSON output.');
+export const InvalidJsonOutputError = defineError('InvalidJsonOutputError', 'INVALID_JSON_OUTPUT', 'JSON output is invalid.');
 export const AmbiguousReferenceError = defineError('AmbiguousReferenceError', 'AMBIGUOUS_REFERENCE', 'Could not resolve reference uniquely.');
 export const MissingReferenceError = defineError('MissingReferenceError', 'MISSING_REFERENCE', 'Missing reference.');
 export const PathSafetyError = defineError('PathSafetyError', 'PATH_OUTSIDE_MEMORY_ROOT', 'Path is not allowed for this command.');
@@ -65,4 +67,3 @@ export function toMemoryMagicoError(err, fallbackCode = 'INTERNAL_ERROR') {
     cause: err,
   });
 }
-

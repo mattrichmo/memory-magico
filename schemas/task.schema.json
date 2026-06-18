@@ -1,17 +1,156 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://memorymagico.local/schemas/task.schema.json",
-  "title": "MemoryMagico Task Frontmatter",
-  "description": "Canonical markdown frontmatter for a task page.",
+  "title": "MemoryMagico Task",
+  "description": "Canonical task frontmatter.",
   "type": "object",
-  "additionalProperties": true,
-  "required": ["id", "kind", "title", "status", "createdAt", "updatedAt"],
+  "additionalProperties": false,
+  "required": ["id", "kind", "title", "status", "paths", "createdAt", "updatedAt"],
   "properties": {
-    "id": { "type": "string" },
+    "id": { "type": "string", "pattern": "^task_[a-z0-9][a-z0-9_-]*$" },
     "kind": { "const": "task" },
-    "title": { "type": "string" },
-    "status": { "type": "string" },
-    "createdAt": { "type": "string" },
-    "updatedAt": { "type": "string" }
+    "title": { "type": "string", "minLength": 1 },
+    "status": { "enum": ["todo", "in_progress", "blocked", "done", "cancelled"] },
+    "aliases": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "uniqueItems": true,
+      "default": []
+    },
+    "tags": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "uniqueItems": true,
+      "default": []
+    },
+    "sourceRefs": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "uniqueItems": true,
+      "default": []
+    },
+    "description": { "type": ["string", "null"] },
+    "why": { "type": ["string", "null"] },
+    "desiredOutcome": { "type": ["string", "null"] },
+    "goal": { "type": ["string", "null"] },
+    "summary": { "type": ["string", "null"] },
+    "sprintId": { "type": ["string", "null"], "pattern": "^sprint_[a-z0-9][a-z0-9_-]*$" },
+    "phaseId": { "type": ["string", "null"], "pattern": "^phase_[a-z0-9][a-z0-9_-]*$" },
+    "issueIds": {
+      "type": "array",
+      "items": { "type": "string", "pattern": "^issue_[a-z0-9][a-z0-9_-]*$" },
+      "uniqueItems": true,
+      "default": []
+    },
+    "initiativeIds": {
+      "type": "array",
+      "items": { "type": "string", "pattern": "^init_[a-z0-9][a-z0-9_-]*$" },
+      "uniqueItems": true,
+      "default": []
+    },
+    "sourceDiscoveryIds": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "uniqueItems": true,
+      "default": []
+    },
+    "sourceCommentIds": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "uniqueItems": true,
+      "default": []
+    },
+    "containerIds": {
+      "type": "array",
+      "items": { "type": "string", "pattern": "^container_[a-z0-9][a-z0-9_-]*$" },
+      "uniqueItems": true,
+      "default": []
+    },
+    "acceptanceCriteria": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "uniqueItems": true,
+      "default": []
+    },
+    "verificationPlan": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "uniqueItems": true,
+      "default": []
+    },
+    "verificationEvidence": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["at"],
+        "properties": {
+          "at": { "type": "string", "format": "date-time" },
+          "result": { "type": ["string", "null"] },
+          "tests": {
+            "type": "array",
+            "items": { "type": "string", "minLength": 1 },
+            "uniqueItems": true
+          },
+          "evidenceRefs": {
+            "type": "array",
+            "items": { "type": "string", "minLength": 1 },
+            "uniqueItems": true
+          },
+          "commits": {
+            "type": "array",
+            "items": { "type": "string", "minLength": 1 },
+            "uniqueItems": true
+          },
+          "pullRequests": {
+            "type": "array",
+            "items": { "type": "string", "minLength": 1 },
+            "uniqueItems": true
+          }
+        }
+      },
+      "default": []
+    },
+    "issueType": {
+      "type": ["string", "null"],
+      "enum": ["bug", "feature", "refactor", "test", "research", "docs", "cleanup", "build", null]
+    },
+    "severity": {
+      "type": ["string", "null"],
+      "enum": ["P0", "P1", "P2", "P3", "P4", null]
+    },
+    "confidence": {
+      "type": ["string", "null"],
+      "enum": ["confirmed", "likely", "hypothesis", "needs_reproduction", null]
+    },
+    "risk": { "type": ["string", "null"] },
+    "dependencies": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "properties": {
+        "blockedByIssueIds": {
+          "type": "array",
+          "items": { "type": "string", "pattern": "^issue_[a-z0-9][a-z0-9_-]*$" },
+          "uniqueItems": true,
+          "default": []
+        },
+        "blocksIssueIds": {
+          "type": "array",
+          "items": { "type": "string", "pattern": "^issue_[a-z0-9][a-z0-9_-]*$" },
+          "uniqueItems": true,
+          "default": []
+        }
+      }
+    },
+    "paths": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["self"],
+      "properties": {
+        "self": { "type": "string", "minLength": 1 }
+      }
+    },
+    "createdAt": { "type": "string", "format": "date-time" },
+    "updatedAt": { "type": "string", "format": "date-time" }
   }
 }

@@ -3,6 +3,7 @@ import fs from 'fs/promises';
 import { memoryRoot } from '../core/paths.mjs';
 import { listSpooledResults, readSpooledResult } from '../core/result-spool.mjs';
 import { writeJsonOutput } from '../core/renderers.mjs';
+import { withLock } from '../core/lock.mjs';
 
 const resultRoot = path.join(memoryRoot, '.mm', 'results');
 
@@ -41,18 +42,19 @@ export async function run(argv = []) {
   if (sub === 'prune') {
     const all = argv.includes('--all');
     const olderThan = argv.indexOf('--older-than') !== -1 ? argv[argv.indexOf('--older-than') + 1] : null;
-    const files = await fs.readdir(resultRoot, { withFileTypes: true }).catch(() => []);
-    if (!all && !olderThan) {
-      console.log('Usage: mm results prune --older-than 30d | --all --yes');
-      return;
-    }
-    for (const entry of files) {
-      if (entry.isFile()) await fs.unlink(path.join(resultRoot, entry.name)).catch(() => {});
-    }
-    console.log('Pruned spooled results.');
+    await withLock('repo-write', async () => {
+      const files = await fs.readdir(resultRoot, { withFileTypes: true }).catch(() => []);
+      if (!all && !olderThan) {
+        console.log('Usage: mm results prune --older-than 30d | --all --yes');
+        return;
+      }
+      for (const entry of files) {
+        if (entry.isFile()) await fs.unlink(path.join(resultRoot, entry.name)).catch(() => {});
+      }
+      console.log('Pruned spooled results.');
+    }, { command: 'mm results prune' });
     return;
   }
 
   console.log(`Unknown results subcommand: ${sub}`);
 }
-
