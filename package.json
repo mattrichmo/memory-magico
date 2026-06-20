@@ -27,6 +27,7 @@
     "mm",
     "src/",
     "schemas/",
+    "templates/",
     "docs/internal/",
     "README.md",
     "CLI.md",

@@ -37,23 +37,31 @@ export const canonicalDirs = [
   path.join('.mm', 'search'),
 ];
 
-export async function ensureWorkspaceStructure() {
-  await mkdirp(memoryRoot);
+export async function ensureWorkspaceStructure(targetRoot) {
+  const root = targetRoot ?? memoryRoot;
+  await mkdirp(root);
+  // Write workspace marker so `findRepoRoot` detects this as a valid workspace
+  const markerDir = path.join(root, '.mm');
+  await mkdirp(markerDir);
+  const markerPath = path.join(markerDir, 'workspace.json');
+  try { await fs.access(markerPath); } catch {
+    await fs.writeFile(markerPath, JSON.stringify({ version: 1, created: new Date().toISOString() }, null, 2) + '\n', 'utf8');
+  }
   for (const rel of canonicalDirs) {
-    const full = path.join(memoryRoot, rel);
+    const full = path.join(root, rel);
     if (path.extname(rel) === '.md') continue;
     await mkdirp(full);
   }
-  await mkdirp(path.join(memoryRoot, 'raw'));
-  await mkdirp(path.join(memoryRoot, 'inbox'));
-  await mkdirp(path.join(memoryRoot, 'inbox', 'raw'));
-  await mkdirp(path.join(memoryRoot, 'inbox', 'processed'));
-  await mkdirp(path.join(memoryRoot, 'inbox', 'rejected'));
-  await mkdirp(path.join(memoryRoot, 'issues'));
-  await mkdirp(path.join(memoryRoot, 'issues', 'containers'));
-  await mkdirp(path.join(memoryRoot, 'issues', 'comments'));
-  await mkdirp(path.join(memoryRoot, 'issues', 'issues'));
-  await mkdirp(path.join(memoryRoot, 'issues', 'relationships'));
+  await mkdirp(path.join(root, 'raw'));
+  await mkdirp(path.join(root, 'inbox'));
+  await mkdirp(path.join(root, 'inbox', 'raw'));
+  await mkdirp(path.join(root, 'inbox', 'processed'));
+  await mkdirp(path.join(root, 'inbox', 'rejected'));
+  await mkdirp(path.join(root, 'issues'));
+  await mkdirp(path.join(root, 'issues', 'containers'));
+  await mkdirp(path.join(root, 'issues', 'comments'));
+  await mkdirp(path.join(root, 'issues', 'issues'));
+  await mkdirp(path.join(root, 'issues', 'relationships'));
 }
 
 export async function workspaceExists() {
@@ -72,7 +80,8 @@ export function workspacePaths() {
   };
 }
 
-export async function writeWorkspaceStarterFiles() {
+export async function writeWorkspaceStarterFiles(targetRoot) {
+  const root = targetRoot ?? memoryRoot;
   const files = {
     'README.md': `# Memory\n\nCanonical memory lives in Markdown pages with YAML frontmatter.\n`,
     'AGENTS.md': `# Agent Rules\n\n- Raw sources are immutable.\n- Wiki pages are canonical.\n- Use the CLI to resolve, search, and update memory.\n`,
@@ -82,7 +91,7 @@ export async function writeWorkspaceStarterFiles() {
     'wiki/open-questions.md': `# Open Questions\n\n- What remains unresolved?\n`,
   };
   for (const [rel, content] of Object.entries(files)) {
-    const full = path.join(memoryRoot, rel);
+    const full = path.join(root, rel);
     await mkdirp(path.dirname(full));
     try {
       await fs.access(full);

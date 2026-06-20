@@ -140,6 +140,16 @@ mm doctor
 mm index rebuild
 ```
 
+`mm init` is interactive when run from a terminal: it asks where to create the workspace, whether it's a standalone memory repo (git init + package.json) or being added to an existing project, whether to detect/overwrite an existing `memory/`, and which agent integration to install. Press enter to accept the recommended defaults, or skip the prompts entirely:
+
+```bash
+mm init --yes                          # accept defaults, non-interactive
+mm init --root ~/projects/my-memory --standalone
+mm init --existing --skip-agent-install --skip-npm-install
+```
+
+Run non-interactively (e.g. from CI or a script) and `mm init` skips the wizard automatically — it defaults to a standalone repo in the current directory with Claude Code agent integration installed, unless `--skip-agent-install` is passed.
+
 `package.json` needs to declare the CLI entrypoint before `npm link` will work:
 
 ```json
@@ -234,7 +244,7 @@ Most read commands support `--json`; agents should use it when parsing results p
 ### Workspace and health
 
 ```bash
-mm init [--force] [--skip-agent-install]
+mm init [--yes|-y] [--root <path>] [--standalone|--existing] [--force] [--skip-agent-install] [--skip-npm-install]
 mm doctor [--json]
 mm lint [--json]
 mm ledger inspect <path> [--tail N] [--json]
@@ -246,7 +256,7 @@ mm schema validate <schema-file> [data-file]
 
 | Command | Description |
 |---|---|
-| `mm init` | Creates the memory workspace scaffold and generated folders. |
+| `mm init` | Interactive wizard (in a terminal) for creating the memory workspace scaffold, generated folders, and optional agent integration; non-interactive when scripted or piped. |
 | `mm doctor` | Validates that the expected scaffold exists. |
 | `mm lint` | Runs schema, referential, and lifecycle invariant checks. |
 | `mm ledger` | Inspects or repairs JSON/JSONL ledgers; repair can quarantine malformed lines. |
@@ -400,14 +410,19 @@ Generates or serves a local view over MemoryMagico data. Defaults to binding `12
 ### Agent installation
 
 ```bash
-mm install claude|codex|all [--roles role_a,role_b] [--dry-run]
+mm install claude|codex|all [--roles role_a,role_b] [--dry-run] [--update]
 ```
 
 ```bash
 mm install all
 mm install claude --roles memorymagico-orchestrator
 mm install codex --roles memorymagico-sprint-launcher --dry-run
+mm install all --update
 ```
+
+`mm init` also offers this as a step in its wizard ("Install agent integration for: Claude Code / Codex / Both / Skip", recommending Claude Code). It always installs only the `memorymagico-orchestrator` role at init time — run `mm install` again afterward to add the other roles or the other target. The non-interactive default (`mm init --yes`, or `mm init` outside a TTY) installs Claude Code only, unless `--skip-agent-install` is passed.
+
+The four built-in `memorymagico-*` roles are bundled with the package (`templates/agents/roles/`) and seeded into a workspace's `memory/agents/roles/` the first time they're missing — this is what lets `mm install`/`mm init` work in a brand-new project even though the source files live in the installed package, not the project. Once seeded, those files are yours to edit; a plain `mm install` never overwrites them again. Run `mm install all --update` to force-refresh the bundled system roles from whatever package version is currently linked or installed (handy when developing MemoryMagico itself via `npm link` and pulling role improvements into other projects). `--update` only ever touches the known `memorymagico-*` system roles — any custom roles you add under `memory/agents/roles/` are never seeded, overwritten, or otherwise modified by `mm install`.
 
 ---
 

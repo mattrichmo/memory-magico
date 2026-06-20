@@ -3,7 +3,7 @@
 ## Core
 
 ```bash
-mm init [--force] [--skip-agent-install]
+mm init [--yes|-y] [--root <path>] [--standalone|--existing] [--force] [--skip-agent-install] [--skip-npm-install]
 mm doctor
 mm index rebuild|status|show
 mm ledger inspect|repair
@@ -56,5 +56,7 @@ mm comment list|show|create|update
 ## Agents
 
 ```bash
-mm install claude|codex|all [--roles role_a,role_b] [--dry-run]
+mm install claude|codex|all [--roles role_a,role_b] [--dry-run] [--update]
 ```
+
+Bundled system roles (`memorymagico-*`) are seeded into `memory/agents/roles/` the first time they're missing. `--update` force-refreshes only those system roles from the installed package and regenerates their agent surfaces — custom roles you've added are never touched.
