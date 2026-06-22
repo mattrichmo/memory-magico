@@ -1,6 +1,7 @@
 import fs from 'fs/promises';
 import path from 'path';
-import { memoryRoot, repoRoot } from './paths.mjs';
+import crypto from 'crypto';
+import { memoryManifestFile, memoryRoot, repoRoot } from './paths.mjs';
 import { exists, mkdirp } from './fs.mjs';
 
 export const canonicalDirs = [
@@ -37,16 +38,43 @@ export const canonicalDirs = [
   path.join('.mm', 'search'),
 ];
 
-export async function ensureWorkspaceStructure(targetRoot) {
+function makeWorkspaceId() {
+  return `mem_${crypto.randomBytes(8).toString('hex')}`;
+}
+
+export async function ensureWorkspaceStructure(targetRoot, options = {}) {
   const root = targetRoot ?? memoryRoot;
   await mkdirp(root);
-  // Write workspace marker so `findRepoRoot` detects this as a valid workspace
   const markerDir = path.join(root, '.mm');
   await mkdirp(markerDir);
+
+  const manifestPath = path.join(root, memoryManifestFile);
+  let workspaceId = options.workspaceId;
+  try {
+    const existing = JSON.parse(await fs.readFile(manifestPath, 'utf8'));
+    workspaceId ||= existing.workspaceId;
+  } catch {
+    // New workspaces get a stable id below.
+  }
+  workspaceId ||= makeWorkspaceId();
+  const manifest = {
+    schemaVersion: 1,
+    workspaceId,
+    name: options.name || path.basename(path.dirname(root)) || 'memory',
+    createdAt: new Date().toISOString(),
+  };
+  try {
+    await fs.access(manifestPath);
+  } catch {
+    await fs.writeFile(manifestPath, JSON.stringify(manifest, null, 2) + '\n', 'utf8');
+  }
+
+  // Legacy marker kept for older workspaces and older packaged CLIs.
   const markerPath = path.join(markerDir, 'workspace.json');
   try { await fs.access(markerPath); } catch {
-    await fs.writeFile(markerPath, JSON.stringify({ version: 1, created: new Date().toISOString() }, null, 2) + '\n', 'utf8');
+    await fs.writeFile(markerPath, JSON.stringify({ version: 1, workspaceId, created: new Date().toISOString() }, null, 2) + '\n', 'utf8');
   }
+
   for (const rel of canonicalDirs) {
     const full = path.join(root, rel);
     if (path.extname(rel) === '.md') continue;
@@ -62,6 +90,7 @@ export async function ensureWorkspaceStructure(targetRoot) {
   await mkdirp(path.join(root, 'issues', 'comments'));
   await mkdirp(path.join(root, 'issues', 'issues'));
   await mkdirp(path.join(root, 'issues', 'relationships'));
+  return { workspaceId, manifestPath };
 }
 
 export async function workspaceExists() {

@@ -394,6 +394,50 @@ test('mm install supports role selection', () => {
   assert.match(result.stdout, /memorymagico-orchestrator/);
 });
 
+test('mm init can bind a repo to a sibling memory workspace', async () => {
+  const tempRoot = await fs.mkdtemp(path.join('/tmp', 'mm-init-sibling-'));
+  const projectRoot = path.join(tempRoot, 'app');
+  const externalMemoryRoot = path.join(tempRoot, 'memory');
+  await fs.mkdir(projectRoot, { recursive: true });
+  spawnSync('git', ['init'], { cwd: projectRoot, encoding: 'utf8' });
+
+  const init = spawnSync('node', [
+    path.join(repoRoot, 'bin', 'mm.mjs'),
+    'init',
+    '--yes',
+    '--project-root',
+    projectRoot,
+    '--memory-root',
+    externalMemoryRoot,
+    '--separate-git',
+  ], {
+    cwd: tempRoot,
+    encoding: 'utf8',
+  });
+
+  try {
+    assert.equal(init.status, 0, init.stderr);
+    const config = JSON.parse(await fs.readFile(path.join(projectRoot, '.memorymagico.json'), 'utf8'));
+    const manifest = JSON.parse(await fs.readFile(path.join(externalMemoryRoot, '.mm', 'manifest.json'), 'utf8'));
+    assert.equal(config.memoryRoot, '../memory');
+    assert.equal(config.workspaceId, manifest.workspaceId);
+    assert.ok(await fs.stat(path.join(projectRoot, '.claude', 'agents', 'memorymagico-orchestrator.md')));
+    assert.ok(await fs.stat(path.join(externalMemoryRoot, 'agents', 'roles', 'memorymagico-orchestrator', 'AGENT.md')));
+
+    const info = spawnSync('node', [path.join(repoRoot, 'bin', 'mm.mjs'), 'info'], {
+      cwd: projectRoot,
+      encoding: 'utf8',
+    });
+    assert.equal(info.status, 0, info.stderr);
+    const realProjectRoot = await fs.realpath(projectRoot);
+    const realMemoryRoot = await fs.realpath(externalMemoryRoot);
+    assert.match(info.stdout, new RegExp(`Repo root: ${realProjectRoot.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`));
+    assert.match(info.stdout, new RegExp(`Memory root: ${realMemoryRoot.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`));
+  } finally {
+    await fs.rm(tempRoot, { recursive: true, force: true });
+  }
+});
+
 test('binary detection checks magic bytes before null-byte fallback', () => {
   const pngHeader = Buffer.from([
     0x89, 0x50, 0x4e, 0x47,

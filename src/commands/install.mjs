@@ -19,12 +19,12 @@
 
 import path from 'path';
 import fs from 'fs/promises';
-import { repoRoot as workspaceRoot, systemRolesDir } from '../core/paths.mjs';
+import { memoryRoot as workspaceMemoryRoot, repoRoot as workspaceRoot, systemRolesDir } from '../core/paths.mjs';
 import { withLock } from '../core/lock.mjs';
 import { validateRoleContract } from '../core/role-contracts.mjs';
 
-function rolesDirFor(destRoot) {
-  return path.join(destRoot ?? workspaceRoot, 'memory', 'agents', 'roles');
+function rolesDirFor(destRoot, sourceMemoryRoot) {
+  return path.join(sourceMemoryRoot ?? path.join(destRoot ?? workspaceRoot, 'memory'), 'agents', 'roles');
 }
 
 // ── System role seeding ─────────────────────────────────────────────────────
@@ -44,14 +44,14 @@ async function listSystemRoleSlugs() {
  * - Existing roles are only overwritten when `force` is set (--update).
  * - Never touches roles that aren't part of the bundled system set.
  */
-async function seedSystemRoles(destRoot, { force = false } = {}) {
+async function seedSystemRoles(destRoot, { force = false, sourceMemoryRoot = null } = {}) {
   const slugs = await listSystemRoleSlugs();
   const seeded = [];
   const updated = [];
 
   for (const slug of slugs) {
     const srcFile = path.join(systemRolesDir, slug, 'AGENT.md');
-    const destDir = path.join(rolesDirFor(destRoot), slug);
+    const destDir = path.join(rolesDirFor(destRoot, sourceMemoryRoot), slug);
     const destFile = path.join(destDir, 'AGENT.md');
 
     let exists = true;
@@ -121,8 +121,8 @@ function parseFrontmatter(content) {
 
 // ── Role loader ────────────────────────────────────────────────────────────
 
-async function loadRoles(destRoot) {
-  const rolesDir = rolesDirFor(destRoot);
+async function loadRoles(destRoot, sourceMemoryRoot) {
+  const rolesDir = rolesDirFor(destRoot, sourceMemoryRoot);
   let entries;
   try {
     entries = await fs.readdir(rolesDir, { withFileTypes: true });
@@ -355,9 +355,9 @@ async function installCodex(roles, dryRun, destRoot) {
   }
 }
 
-export async function installRoles(target, destRoot, { roleFilter, dryRun, update = false } = {}) {
-  await seedSystemRoles(destRoot, { force: update });
-  const allRoles = await loadRoles(destRoot);
+export async function installRoles(target, destRoot, { roleFilter, dryRun, update = false, sourceMemoryRoot = null } = {}) {
+  await seedSystemRoles(destRoot, { force: update, sourceMemoryRoot });
+  const allRoles = await loadRoles(destRoot, sourceMemoryRoot);
   if (!allRoles.length) {
     console.log('No roles found in memory/agents/roles/');
     return;
@@ -422,11 +422,11 @@ export async function run(argv) {
   }
 
   return withLock('repo-write', async () => {
-    const { seeded, updated } = await seedSystemRoles(undefined, { force: update });
+    const { seeded, updated } = await seedSystemRoles(undefined, { force: update, sourceMemoryRoot: workspaceMemoryRoot });
     for (const slug of seeded) console.log(`  ✓ seeded memory/agents/roles/${slug}/AGENT.md`);
     for (const slug of updated) console.log(`  ✓ updated memory/agents/roles/${slug}/AGENT.md from bundled defaults`);
 
-    const allRoles = await loadRoles();
+    const allRoles = await loadRoles(undefined, workspaceMemoryRoot);
     if (!allRoles.length) {
       console.log('No roles found in memory/agents/roles/');
       return;

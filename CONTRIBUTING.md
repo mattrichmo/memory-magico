@@ -4,6 +4,7 @@
 
 ```text
 .
+├── .memorymagico.json                 # optional project pointer to memoryRoot
 ├── bin/
 │   └── mm.mjs                         # CLI entrypoint
 ├── src/
@@ -38,11 +39,12 @@
     │   └── containers/
     ├── generated/                     # generated indexes and dashboard data
     └── .mm/
+        ├── manifest.json              # workspace identity used by .memorymagico.json
         ├── locks/                     # lock files for write operations
         └── search/                    # search manifest and index state
 ```
 
-See [IMPLEMENTATION.md](IMPLEMENTATION.md) for `toolRoot`/`repoRoot`/`memoryRoot` path resolution.
+See [IMPLEMENTATION.md](IMPLEMENTATION.md) for `toolRoot`/`repoRoot`/`memoryRoot` path resolution. Packaged `mm` commands should resolve memory from the nearest `.memorymagico.json` first, then validate it against `memory/.mm/manifest.json`.
 
 ## Testing and validation
 

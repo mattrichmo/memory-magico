@@ -17,10 +17,12 @@ The new direction is:
 ## Workspace Roots
 
 ```text
-toolRoot   = repo/package root
-repoRoot   = workspace root
-memoryRoot = <repo>/memory
+toolRoot   = installed package root
+repoRoot   = project root that owns .memorymagico.json, or a legacy workspace root
+memoryRoot = path from .memorymagico.json, explicit --memory-root, or legacy <repo>/memory
 ```
+
+`.memorymagico.json` stores the repo-local pointer to memory, and `memory/.mm/manifest.json` stores the workspace identity. When both include a `workspaceId`, the CLI validates that they match before operating on memory.
 
 ## Current Verification
 

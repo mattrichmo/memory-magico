@@ -14,7 +14,7 @@ Most read commands support `--json`; agents should use it when parsing results p
 ## Workspace and health
 
 ```bash
-mm init [--yes|-y] [--root <path>] [--standalone|--existing] [--force] [--skip-agent-install] [--skip-npm-install]
+mm init [--yes|-y] [--project-root <path>] [--memory-root <path>] [--separate-git|--in-repo-memory] [--force] [--skip-agent-install]
 mm doctor [--json]
 mm lint [--json]
 mm ledger inspect <path> [--tail N] [--json]
@@ -26,7 +26,7 @@ mm schema validate <schema-file> [data-file]
 
 | Command | Description |
 |---|---|
-| `mm init` | Interactive wizard (in a terminal) for creating the memory workspace scaffold, generated folders, and optional agent integration; non-interactive when scripted or piped. |
+| `mm init` | Interactive wizard (in a terminal) for creating the memory workspace scaffold, writing `.memorymagico.json` into the selected repo, and installing optional generated agent surfaces. |
 | `mm doctor` | Validates that the expected scaffold exists. |
 | `mm lint` | Runs schema, referential, and lifecycle invariant checks. |
 | `mm ledger` | Inspects or repairs JSON/JSONL ledgers; repair can quarantine malformed lines. |
@@ -201,6 +201,8 @@ mm install all --update
 ```
 
 Bundled system roles (`memorymagico-*`) are seeded into `memory/agents/roles/` the first time they're missing. `--update` force-refreshes only those system roles from the installed package and regenerates their agent surfaces — custom roles you've added are never touched. `mm init` offers this as a wizard step and always installs only `memorymagico-orchestrator` for Claude Code by default. See [docs/agent-system.md](docs/agent-system.md) for role definitions and rules.
+
+When a repo uses a sibling memory workspace, `mm install` reads role sources from the configured `memoryRoot` in `.memorymagico.json` and writes generated `.claude/` or `.agents/` files into the repo where the command is run.
 
 ## Troubleshooting
 
