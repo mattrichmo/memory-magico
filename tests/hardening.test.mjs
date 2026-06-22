@@ -438,6 +438,29 @@ test('mm init can bind a repo to a sibling memory workspace', async () => {
   }
 });
 
+test('mm info outside a workspace does not fall back to package memory', async () => {
+  const tempRoot = await fs.mkdtemp(path.join('/tmp', 'mm-no-workspace-'));
+  try {
+    const info = spawnSync('node', [path.join(repoRoot, 'bin', 'mm.mjs'), 'info'], {
+      cwd: tempRoot,
+      encoding: 'utf8',
+    });
+    assert.equal(info.status, 0, info.stderr);
+    assert.match(info.stdout, /Workspace: not found/);
+    assert.doesNotMatch(info.stdout, /Repo root: .*memory-magico/);
+    assert.doesNotMatch(info.stdout, /Memory root: .*memory-magico\/memory/);
+
+    const doctor = spawnSync('node', [path.join(repoRoot, 'bin', 'mm.mjs'), 'doctor'], {
+      cwd: tempRoot,
+      encoding: 'utf8',
+    });
+    assert.notEqual(doctor.status, 0);
+    assert.match(doctor.stderr, /No MemoryMagico workspace found/);
+  } finally {
+    await fs.rm(tempRoot, { recursive: true, force: true });
+  }
+});
+
 test('binary detection checks magic bytes before null-byte fallback', () => {
   const pngHeader = Buffer.from([
     0x89, 0x50, 0x4e, 0x47,

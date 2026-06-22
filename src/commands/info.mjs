@@ -3,6 +3,14 @@ import { listCommands } from '../core/command-registry.mjs';
 
 export async function run() {
   console.log('Tool root:', toolRoot);
+  if (!workspace) {
+    console.log('Workspace: not found');
+    console.log('Current directory:', process.cwd());
+    console.log('Hint: run `mm init`, cd into a repo with .memorymagico.json, or pass --memory-root <path>.');
+    console.log('Schemas root:', schemasRoot);
+    console.log('Available top-level commands:', listCommands().map(command => command.name).join(', '));
+    return;
+  }
   console.log('Repo root:', repoRoot);
   console.log('Memory root:', memoryRoot);
   if (workspace?.configPath) console.log('Project config:', workspace.configPath);

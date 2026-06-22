@@ -152,7 +152,7 @@ export function requireRepoRoot(startDir = process.cwd()) {
 
 // repoRoot may be null when no workspace exists (e.g. during `mm init`)
 export const workspace = resolveWorkspace();
-export const repoRoot = workspace?.repoRoot ?? toolRoot;
+export const repoRoot = workspace?.repoRoot ?? process.cwd();
 export const memoryRoot = workspace?.memoryRoot ?? path.join(repoRoot, 'memory');
 export const schemasRoot = path.join(toolRoot, 'schemas');
 // Bundled defaults shipped with the package — source of truth for system agent

@@ -1,10 +1,11 @@
 import { getCommand } from '../core/command-registry.mjs';
 import { COMMAND_HANDLERS } from '../core/command-handlers.mjs';
 import { withJsonStdoutGuard } from '../core/stdout-guard.mjs';
-import { toMemoryMagicoError, UnknownCommandError, UnsupportedJsonOutputError } from '../core/errors.mjs';
+import { toMemoryMagicoError, UnknownCommandError, UnsupportedJsonOutputError, WorkspaceNotFoundError } from '../core/errors.mjs';
 import { writeJsonOutput } from '../core/renderers.mjs';
 import { withLock } from '../core/lock.mjs';
 import { indexStatus, rebuildIndex } from '../core/retrieval.mjs';
+import { workspace } from '../core/paths.mjs';
 
 const WORKSPACE_WRITE_COMMANDS = new Set([
   'add',
@@ -28,7 +29,14 @@ const WORKSPACE_WRITE_COMMANDS = new Set([
   'task',
   'wiki',
   'ingest',
+]);
+
+const WORKSPACE_OPTIONAL_COMMANDS = new Set([
+  'help',
+  'commands',
+  'info',
   'init',
+  'schema',
 ]);
 
 export async function run(argv) {
@@ -41,6 +49,11 @@ export async function run(argv) {
       throw new UnknownCommandError(`Unknown command: ${cmd}`, {
         details: { command: cmd },
         hint: 'Run `mm commands` to list available commands.',
+      });
+    }
+    if (!workspace && !WORKSPACE_OPTIONAL_COMMANDS.has(command.name)) {
+      throw new WorkspaceNotFoundError('No MemoryMagico workspace found for this directory.', {
+        hint: 'Run `mm init` here, cd into a repo with .memorymagico.json, or pass --memory-root <path>.',
       });
     }
     if (command.requiresFreshIndex) {

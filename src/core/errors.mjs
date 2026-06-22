@@ -45,6 +45,7 @@ export const ResultTooLargeError = defineError('ResultTooLargeError', 'RESULT_TO
 export const LockError = defineError('LockError', 'LOCK_HELD', 'Lock is held by another process.');
 export const AbortCommandError = defineError('AbortCommandError', 'COMMAND_ABORTED', 'Command aborted.', 130);
 export const UnsupportedMediaError = defineError('UnsupportedMediaError', 'UNSUPPORTED_MEDIA_TYPE', 'Unsupported media type.');
+export const WorkspaceNotFoundError = defineError('WorkspaceNotFoundError', 'WORKSPACE_NOT_FOUND', 'No MemoryMagico workspace found.');
 
 export function isMemoryMagicoError(err) {
   return err instanceof MemoryMagicoError || Boolean(err && typeof err === 'object' && err.code && err.exitCode !== undefined);
