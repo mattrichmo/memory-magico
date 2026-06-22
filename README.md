@@ -101,15 +101,16 @@ mm doctor
 mm index rebuild
 ```
 
-`mm init` is interactive when run from a terminal: it asks which repo should receive `.memorymagico.json`, where the memory folder should live, whether that memory folder should be a separate git repo/folder or live inside the selected repo, and which agent integration to install. This keeps the npm package code outside the project while binding the local `mm` command to one explicit memory workspace.
+`mm init` is interactive when run from a terminal: it asks which repo should receive `.memorymagico.json`, where the memory folder should live, whether that memory folder should be a separate git repo/folder or live inside the selected repo, where generated agent files should be installed, and which agent integration to install. This keeps the npm package code outside the project while binding the local `mm` command to one explicit memory workspace.
 
 ```bash
 mm init
 mm init --yes --project-root ~/projects/app --memory-root ~/projects/memory --separate-git
+mm init --yes --project-root ~/projects/app --memory-root ~/projects/memory --install-root ~/projects
 mm init --yes --project-root ~/projects/app --in-repo-memory --skip-agent-install
 ```
 
-Run non-interactively (e.g. from CI or a script) and `mm init` skips the wizard. Use `--project-root` to choose where `.memorymagico.json` is written and `--memory-root` to choose the actual memory workspace. After setup, `mm` resolves from the repo-local pointer and validates its `workspaceId` against `memory/.mm/manifest.json`.
+Run non-interactively (e.g. from CI or a script) and `mm init` skips the wizard. Use `--project-root` to choose where the project pointer is written, `--memory-root` to choose the actual memory workspace, and `--install-root` when `.agents/` or `.claude/` should live in a top-level folder beside both the project repo and `memory/`. After setup, `mm` resolves from the nearest pointer and validates its `workspaceId` against `memory/.mm/manifest.json`.
 
 `package.json` needs to declare the CLI entrypoint before `npm link` will work:
 

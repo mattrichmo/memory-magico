@@ -423,6 +423,8 @@ test('mm init can bind a repo to a sibling memory workspace', async () => {
     assert.equal(config.workspaceId, manifest.workspaceId);
     assert.ok(await fs.stat(path.join(projectRoot, '.claude', 'agents', 'memorymagico-orchestrator.md')));
     assert.ok(await fs.stat(path.join(externalMemoryRoot, 'agents', 'roles', 'memorymagico-orchestrator', 'AGENT.md')));
+    assert.ok(await fs.stat(path.join(externalMemoryRoot, 'agents', 'roles', 'memorymagico-staleness-auditor', 'AGENT.md')));
+    assert.ok(await fs.stat(path.join(externalMemoryRoot, 'agents', 'roles', 'memorymagico-thread-reconcile', 'AGENT.md')));
 
     const info = spawnSync('node', [path.join(repoRoot, 'bin', 'mm.mjs'), 'info'], {
       cwd: projectRoot,
@@ -433,6 +435,72 @@ test('mm init can bind a repo to a sibling memory workspace', async () => {
     const realMemoryRoot = await fs.realpath(externalMemoryRoot);
     assert.match(info.stdout, new RegExp(`Repo root: ${realProjectRoot.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`));
     assert.match(info.stdout, new RegExp(`Memory root: ${realMemoryRoot.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`));
+  } finally {
+    await fs.rm(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test('mm install can target a top-level agent root with its own project pointer', async () => {
+  const tempRoot = await fs.mkdtemp(path.join('/tmp', 'mm-install-root-'));
+  const topRoot = path.join(tempRoot, 'top');
+  const projectRoot = path.join(topRoot, 'app');
+  const externalMemoryRoot = path.join(topRoot, 'memory');
+  await fs.mkdir(projectRoot, { recursive: true });
+  spawnSync('git', ['init'], { cwd: projectRoot, encoding: 'utf8' });
+
+  const init = spawnSync('node', [
+    path.join(repoRoot, 'bin', 'mm.mjs'),
+    'init',
+    '--yes',
+    '--project-root',
+    projectRoot,
+    '--memory-root',
+    externalMemoryRoot,
+    '--separate-git',
+    '--skip-agent-install',
+  ], {
+    cwd: tempRoot,
+    encoding: 'utf8',
+  });
+
+  const install = spawnSync('node', [
+    path.join(repoRoot, 'bin', 'mm.mjs'),
+    'install',
+    'codex',
+    '--roles',
+    'memorymagico-orchestrator,memorymagico-retrieval,memorymagico-wiki',
+    '--install-root',
+    topRoot,
+  ], {
+    cwd: projectRoot,
+    encoding: 'utf8',
+  });
+
+  try {
+    assert.equal(init.status, 0, init.stderr);
+    assert.equal(install.status, 0, install.stderr);
+    const topConfig = JSON.parse(await fs.readFile(path.join(topRoot, '.memorymagico.json'), 'utf8'));
+    assert.equal(topConfig.memoryRoot, './memory');
+    const skill = await fs.readFile(path.join(topRoot, '.agents', 'skills', 'memorymagico-orchestrator', 'SKILL.md'), 'utf8');
+    assert.match(skill, /mm read agents\/roles\/memorymagico-orchestrator\/AGENT\.md/);
+    assert.match(skill, /## Role Workflow/);
+    assert.match(skill, /## Completion Checks/);
+    assert.match(skill, /memorymagico-thread-reconcile/);
+    assert.match(skill, /memorymagico-staleness-auditor/);
+    const retrievalSkill = await fs.readFile(path.join(topRoot, '.agents', 'skills', 'memorymagico-retrieval', 'SKILL.md'), 'utf8');
+    assert.match(retrievalSkill, /Retrieve and summarize memory truth without mutating the workspace/);
+    assert.match(retrievalSkill, /Do not create, edit, archive, or process memory records/);
+    const wikiSkill = await fs.readFile(path.join(topRoot, '.agents', 'skills', 'memorymagico-wiki', 'SKILL.md'), 'utf8');
+    assert.match(wikiSkill, /Basis And Competing Truth Check/);
+    assert.match(wikiSkill, /Ask before mutating canonical wiki/);
+
+    const info = spawnSync('node', [path.join(repoRoot, 'bin', 'mm.mjs'), 'info'], {
+      cwd: topRoot,
+      encoding: 'utf8',
+    });
+    assert.equal(info.status, 0, info.stderr);
+    assert.match(info.stdout, /Project config:/);
+    assert.match(info.stdout, /Workspace id:/);
   } finally {
     await fs.rm(tempRoot, { recursive: true, force: true });
   }

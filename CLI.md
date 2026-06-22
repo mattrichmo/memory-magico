@@ -14,7 +14,7 @@ Most read commands support `--json`; agents should use it when parsing results p
 ## Workspace and health
 
 ```bash
-mm init [--yes|-y] [--project-root <path>] [--memory-root <path>] [--separate-git|--in-repo-memory] [--force] [--skip-agent-install]
+mm init [--yes|-y] [--project-root <path>] [--memory-root <path>] [--install-root <path>] [--separate-git|--in-repo-memory] [--force] [--skip-agent-install]
 mm doctor [--json]
 mm lint [--json]
 mm ledger inspect <path> [--tail N] [--json]
@@ -190,19 +190,20 @@ Generates or serves a local view over MemoryMagico data. Defaults to binding `12
 ## Agents
 
 ```bash
-mm install claude|codex|all [--roles role_a,role_b] [--dry-run] [--update]
+mm install claude|codex|all [--roles role_a,role_b] [--install-root <path>] [--dry-run] [--update]
 ```
 
 ```bash
 mm install all
 mm install claude --roles memorymagico-orchestrator
 mm install codex --roles memorymagico-sprint-launcher --dry-run
+mm install all --install-root ..
 mm install all --update
 ```
 
 Bundled system roles (`memorymagico-*`) are seeded into `memory/agents/roles/` the first time they're missing. `--update` force-refreshes only those system roles from the installed package and regenerates their agent surfaces — custom roles you've added are never touched. `mm init` offers this as a wizard step and always installs only `memorymagico-orchestrator` for Claude Code by default. See [docs/agent-system.md](docs/agent-system.md) for role definitions and rules.
 
-When a repo uses a sibling memory workspace, `mm install` reads role sources from the configured `memoryRoot` in `.memorymagico.json` and writes generated `.claude/` or `.agents/` files into the repo where the command is run.
+When a repo uses a sibling memory workspace, `mm install` reads role sources from the configured `memoryRoot` in `.memorymagico.json`. By default it writes generated `.claude/` or `.agents/` files into the configured project root. Use `--install-root <path>` to write those files into a top-level folder beside both `memory/` and the project repo; MemoryMagico writes a matching `.memorymagico.json` there so global `mm` commands resolve the same workspace.
 
 ## Troubleshooting
 

@@ -9,6 +9,7 @@ import { ensureWorkspaceStructure, writeWorkspaceStarterFiles } from '../core/wo
 import { mkdirp } from '../core/fs.mjs';
 import { atomicWriteText } from '../core/atomic-write.mjs';
 import { withLock } from '../core/lock.mjs';
+import { writeProjectConfig } from '../core/project-config.mjs';
 import { installRoles } from './install.mjs';
 
 const execFileAsync = promisify(execFile);
@@ -151,34 +152,10 @@ async function detectExistingMemory(targetMemoryRoot) {
   return exists(targetMemoryRoot);
 }
 
-function relativeJsonPath(fromDir, targetPath) {
-  let rel = path.relative(fromDir, targetPath).split(path.sep).join('/');
-  if (!rel.startsWith('.')) rel = `./${rel}`;
-  return rel;
-}
-
 async function readWorkspaceId(memoryRoot) {
   const manifestPath = path.join(memoryRoot, '.mm', 'manifest.json');
   const raw = await fs.readFile(manifestPath, 'utf8');
   return JSON.parse(raw).workspaceId;
-}
-
-async function writeProjectConfig(projectRoot, memoryRoot, workspaceId, { force = false } = {}) {
-  await mkdirp(projectRoot);
-  const configPath = path.join(projectRoot, projectConfigFile);
-  const payload = {
-    schemaVersion: 1,
-    memoryRoot: relativeJsonPath(projectRoot, memoryRoot),
-    workspaceId,
-  };
-  if (!force && await exists(configPath)) {
-    const existing = JSON.parse(await fs.readFile(configPath, 'utf8'));
-    if (existing.workspaceId && existing.workspaceId !== workspaceId) {
-      throw new Error(`${projectConfigFile} already points at ${existing.workspaceId}. Use --force to replace it.`);
-    }
-  }
-  await atomicWriteText(configPath, `${JSON.stringify(payload, null, 2)}\n`);
-  return configPath;
 }
 
 async function ensureGitRepo(root, { init = false } = {}) {
@@ -202,6 +179,7 @@ export async function run(argv) {
   const inRepoFlag = argv.includes('--in-repo-memory') || argv.includes('--existing');
   const projectRootArg = argValue(argv, '--project-root');
   const memoryRootArg = argValue(argv, '--memory-root') || argValue(argv, '--root');
+  const installRootArg = argValue(argv, '--install-root') || argValue(argv, '--agent-root');
 
   const interactive = !yes && isInteractive();
   let rl;
@@ -310,15 +288,24 @@ export async function run(argv) {
     }
 
     let agentTarget = null;
+    let installRoot = installRootArg ? expandPath(installRootArg) : projectRoot;
     if (!skipAgentInstall) {
       if (interactive) {
-        agentTarget = await promptChoice(rl, 'Install agent integration into the selected repo?', [
+        agentTarget = await promptChoice(rl, 'Install agent integration?', [
           { value: 'claude', label: 'Claude Code', detail: '.claude/agents/ and .claude/commands/' },
           { value: 'codex', label: 'Codex', detail: '.agents/skills/' },
           { value: 'all', label: 'Both', detail: 'Install both generated surfaces.' },
           { value: 'none', label: 'Skip', detail: 'Only create memory workspace and pointer.' },
         ]);
         if (agentTarget === 'none') agentTarget = null;
+        if (agentTarget && !installRootArg) {
+          const parentRoot = path.dirname(memoryRoot);
+          installRoot = await promptChoice(rl, 'Where should generated agent files be installed?', [
+            { value: projectRoot, label: `Selected project repo: ${path.basename(projectRoot)}`, detail: projectRoot },
+            { value: parentRoot, label: `Top-level folder beside memory: ${path.basename(parentRoot)}`, detail: parentRoot },
+            { value: cwd, label: `Current directory: ${path.basename(cwd) || cwd}`, detail: cwd },
+          ]);
+        }
       } else {
         agentTarget = 'claude';
       }
@@ -330,7 +317,7 @@ export async function run(argv) {
       console.log(`  ${color.green('memory')}  ${memoryRoot}`);
       console.log(`  ${color.green('config')}  ${path.join(projectRoot, projectConfigFile)}`);
       console.log(`  ${color.green('mode')}    ${separateGit ? 'separate memory git repo/folder' : 'included in selected repo'}`);
-      if (agentTarget) console.log(`  ${color.green('agents')}  ${agentTarget}`);
+      if (agentTarget) console.log(`  ${color.green('agents')}  ${agentTarget} at ${installRoot}`);
       const go = await promptYesNo(rl, '\nProceed?', true);
       if (!go) {
         console.log('\nAborted.');
@@ -358,15 +345,22 @@ export async function run(argv) {
       process.stdout.write(`  ${color.green('✓')} project pointer written at ${configPath}\n`);
 
       if (agentTarget) {
-        await installRoles(agentTarget, projectRoot, {
+        if (path.resolve(installRoot) !== path.resolve(projectRoot)) {
+          const installConfigPath = await writeProjectConfig(installRoot, memoryRoot, workspaceId, { force });
+          process.stdout.write(`  ${color.green('✓')} agent-root pointer written at ${installConfigPath}\n`);
+        }
+        await installRoles(agentTarget, installRoot, {
           roleFilter: ['memorymagico-orchestrator'],
           sourceMemoryRoot: memoryRoot,
+          memoryRoot,
+          workspaceId,
+          forceConfig: force,
         });
-        process.stdout.write(`  ${color.green('✓')} agent integration installed in ${projectRoot}\n`);
+        process.stdout.write(`  ${color.green('✓')} agent integration installed in ${installRoot}\n`);
       }
 
       console.log(`\n${color.bold('Done')}`);
-      console.log(`  cd ${projectRoot}`);
+      console.log(`  cd ${installRoot}`);
       console.log('  mm doctor');
       console.log('  mm info\n');
     }, { command: 'mm init', root: memoryRoot });
