@@ -66,7 +66,7 @@ export async function run(argv = []) {
   const sub = argv[1] || 'inspect';
   const target = argv[2];
   if (sub === 'inspect') {
-    if (!target) return console.log('Usage: mm image inspect <path>');
+    if (!target || target === '--help' || target === '-h') return console.log('Usage: mm image inspect <path>');
     const abs = await resolveExternalSourcePath(target);
     const maxBytes = parseFlagNumber(argv, '--max-bytes', 64 * 1024);
     const handle = await fs.open(abs, 'r');
@@ -103,7 +103,7 @@ export async function run(argv = []) {
     return;
   }
   if (sub === 'encode') {
-    if (!target) return console.log('Usage: mm image encode <path> [--json]');
+    if (!target || target === '--help' || target === '-h') return console.log('Usage: mm image encode <path> [--json]');
     const abs = await resolveExternalSourcePath(target);
     const maxChars = parseFlagNumber(argv, '--max-bytes', 256 * 1024);
     const allowLarge = argv.includes('--allow-large');
@@ -147,7 +147,7 @@ export async function run(argv = []) {
     return;
   }
   if (sub === 'add') {
-    if (!target) return console.log('Usage: mm image add <path>');
+    if (!target || target === '--help' || target === '-h') return console.log('Usage: mm image add <path>');
     const maxBytes = parseFlagNumber(argv, '--max-bytes', 256 * 1024);
     const allowLarge = argv.includes('--allow-large');
     const item = await withLock('repo-write', () => storeImage(target, { maxBytes, allowLarge }), { command: 'mm image add' });

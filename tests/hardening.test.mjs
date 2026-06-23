@@ -11,7 +11,8 @@ import { readMarkdownPage, writeMarkdownPage } from '../src/core/frontmatter.mjs
 import { safeParseJson } from '../src/core/json-safe.mjs';
 import { resolveMemoryPath } from '../src/core/safe-path.mjs';
 import { memoryRoot } from '../src/core/paths.mjs';
-import { getCommand } from '../src/core/command-registry.mjs';
+import { getCommand, listCommands } from '../src/core/command-registry.mjs';
+import { COMMAND_HANDLERS } from '../src/core/command-handlers.mjs';
 import { indexStatus, rebuildIndex } from '../src/core/retrieval.mjs';
 import { makeId } from '../src/core/ids.mjs';
 import { resolveRecordJsonPath } from '../src/core/records.mjs';
@@ -39,6 +40,41 @@ function captureJsonResponse() {
 test('registry exposes commands and aliases', () => {
   assert.ok(getCommand('commands'));
   assert.equal(getCommand('find')?.name, 'search');
+});
+
+test('every registered command has a handler and useful help metadata', () => {
+  const commands = listCommands();
+  assert.ok(commands.length > 30, 'registry unexpectedly small');
+
+  for (const command of commands) {
+    assert.equal(typeof COMMAND_HANDLERS[command.name], 'function', `${command.name} is registered without a handler`);
+    assert.equal(typeof command.summary, 'string', `${command.name} is missing summary`);
+    assert.ok(command.summary.length > 0, `${command.name} summary is empty`);
+    assert.equal(typeof command.description, 'string', `${command.name} is missing description`);
+    assert.ok(command.description.length > 0, `${command.name} description is empty`);
+    assert.ok(Array.isArray(command.examples), `${command.name} examples must be an array`);
+    assert.ok(command.examples.length > 0, `${command.name} needs at least one example`);
+    assert.ok(command.examples.every(example => example.startsWith(`mm ${command.name}`) || (command.aliases || []).some(alias => example.startsWith(`mm ${alias}`))), `${command.name} examples must start with the command name or alias`);
+  }
+
+  assert.equal(getCommand('doctor').readOnly, false, 'doctor --fix writes scaffold files, so doctor cannot be read-only');
+  assert.equal(getCommand('image').readOnly, false, 'image add writes raw intake, so image cannot be read-only');
+  assert.equal(getCommand('results').readOnly, false, 'results prune mutates spooled results, so results cannot be read-only');
+  assert.match(getCommand('issue').description, /Creates/);
+  assert.match(getCommand('sprint').description, /composes/);
+  assert.match(getCommand('task').description, /completes/);
+});
+
+test('mm help works for every registered command', () => {
+  for (const command of listCommands()) {
+    const result = spawnSync('node', ['./bin/mm.mjs', 'help', command.name], {
+      cwd: repoRoot,
+      encoding: 'utf8',
+    });
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.stdout, new RegExp(`^${command.name}\\n`), `${command.name} help does not start with command name`);
+    assert.match(result.stdout, /Examples:/, `${command.name} help does not include examples`);
+  }
 });
 
 test('safeParseJson strips a BOM', () => {
@@ -353,6 +389,229 @@ test('mm raw list --json is parseable', () => {
   assert.ok(Array.isArray(payload.items));
 });
 
+test('mm raw add --help is read-only usage output', async () => {
+  const rawJsonl = path.join(repoRoot, 'memory', 'inbox', 'raw-items.jsonl');
+  const rawDir = path.join(repoRoot, 'memory', 'inbox', 'raw');
+  const beforeLedger = await fs.readFile(rawJsonl, 'utf8').catch(() => '');
+  const beforeFiles = new Set(await fs.readdir(rawDir).catch(() => []));
+
+  const result = spawnSync('node', ['./bin/mm.mjs', 'raw', 'add', '--help'], {
+    cwd: repoRoot,
+    encoding: 'utf8',
+  });
+
+  const afterLedger = await fs.readFile(rawJsonl, 'utf8').catch(() => '');
+  const afterFiles = new Set(await fs.readdir(rawDir).catch(() => []));
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /Usage: mm raw add/);
+  assert.equal(afterLedger, beforeLedger);
+  assert.deepEqual(afterFiles, beforeFiles);
+});
+
+test('path-taking help flags are read-only usage output', async () => {
+  const rawJsonl = path.join(repoRoot, 'memory', 'inbox', 'raw-items.jsonl');
+  const rawDir = path.join(repoRoot, 'memory', 'inbox', 'raw');
+  const beforeLedger = await fs.readFile(rawJsonl, 'utf8').catch(() => '');
+  const beforeFiles = new Set(await fs.readdir(rawDir).catch(() => []));
+  const cases = [
+    { args: ['add', '--help'], pattern: /Usage: mm add/ },
+    { args: ['image', 'inspect', '--help'], pattern: /Usage: mm image inspect/ },
+    { args: ['image', 'encode', '--help'], pattern: /Usage: mm image encode/ },
+    { args: ['image', 'add', '--help'], pattern: /Usage: mm image add/ },
+  ];
+
+  for (const item of cases) {
+    const result = spawnSync('node', ['./bin/mm.mjs', ...item.args], {
+      cwd: repoRoot,
+      encoding: 'utf8',
+    });
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(result.stdout, item.pattern, item.args.join(' '));
+  }
+
+  const afterLedger = await fs.readFile(rawJsonl, 'utf8').catch(() => '');
+  const afterFiles = new Set(await fs.readdir(rawDir).catch(() => []));
+  assert.equal(afterLedger, beforeLedger);
+  assert.deepEqual(afterFiles, beforeFiles);
+});
+
+test('issue promotion roles expose issue creation', async () => {
+  const roleFiles = [
+    'templates/agents/roles/memorymagico-orchestrator/AGENT.md',
+    'templates/agents/roles/memorymagico-work-closeout/AGENT.md',
+    'templates/agents/roles/memorymagico-raw-reconcile/AGENT.md',
+    'memory/agents/roles/memorymagico-orchestrator/AGENT.md',
+    'memory/agents/roles/memorymagico-work-closeout/AGENT.md',
+    'memory/agents/roles/memorymagico-raw-reconcile/AGENT.md',
+  ];
+
+  for (const relPath of roleFiles) {
+    const text = await fs.readFile(path.join(repoRoot, relPath), 'utf8');
+    assert.match(text, /^\s+- mm issue create$/m, `${relPath} does not allow issue creation`);
+  }
+});
+
+test('sprint launcher exposes full tracker creation workflow', async () => {
+  const roleFiles = [
+    'templates/agents/roles/memorymagico-sprint-launcher/AGENT.md',
+    'memory/agents/roles/memorymagico-sprint-launcher/AGENT.md',
+  ];
+  const requiredTools = [
+    'mm issue create',
+    'mm sprint compose',
+    'mm sprint create',
+    'mm sprint update',
+    'mm phase create',
+    'mm phase update',
+    'mm task create',
+    'mm task update',
+  ];
+
+  for (const relPath of roleFiles) {
+    const text = await fs.readFile(path.join(repoRoot, relPath), 'utf8');
+    for (const tool of requiredTools) {
+      assert.match(text, new RegExp(`^\\s+- ${tool}$`, 'm'), `${relPath} does not allow ${tool}`);
+    }
+    assert.match(text, /Tracker Creation Workflow/, `${relPath} lacks tracker creation instructions`);
+    assert.match(text, /Do not claim task, phase, or sprint creation is unavailable/, `${relPath} lacks regression guardrail`);
+  }
+});
+
+test('mm sprint compose creates linked sprint phase and tasks from issues', async () => {
+  const suffix = makeId('compose').replace(/^compose_/, '');
+  const issueA = `issue_compose_${suffix}_a`;
+  const issueB = `issue_compose_${suffix}_b`;
+  const sprintId = `sprint_compose_${suffix}`;
+  const phaseId = `phase_compose_${suffix}`;
+  const taskA = `task_compose_${suffix}_a`;
+  const taskB = `task_compose_${suffix}_b`;
+  const indexFiles = [
+    'memory/work/issues/index.jsonl',
+    'memory/work/sprints/index.jsonl',
+    'memory/work/phases/index.jsonl',
+    'memory/work/tasks/index.jsonl',
+  ];
+  const snapshots = new Map();
+  const generatedPaths = [
+    `memory/work/issues/${issueA}.md`,
+    `memory/work/issues/${issueB}.md`,
+    `memory/work/sprints/${sprintId}.md`,
+    `memory/work/phases/${phaseId}.md`,
+    `memory/work/tasks/${taskA}.md`,
+    `memory/work/tasks/${taskB}.md`,
+  ];
+
+  try {
+    for (const relPath of indexFiles) {
+      snapshots.set(relPath, await fs.readFile(path.join(repoRoot, relPath), 'utf8').catch(() => null));
+    }
+
+    for (const [id, title] of [[issueA, 'First compose bug'], [issueB, 'Second compose bug']]) {
+      const created = spawnSync('node', [
+        './bin/mm.mjs',
+        'issue',
+        'create',
+        title,
+        '--id',
+        id,
+        '--issue-type',
+        'bug',
+        '--severity',
+        'P2',
+        '--confidence',
+        'confirmed',
+        '--risk',
+        'Bug blocks the composed workflow',
+        '--acceptance',
+        `Acceptance for ${id}`,
+        '--verification',
+        `Verification for ${id}`,
+        '--json',
+      ], {
+        cwd: repoRoot,
+        encoding: 'utf8',
+      });
+      assert.equal(created.status, 0, created.stderr);
+      const payload = JSON.parse(created.stdout);
+      assert.equal(payload.ok, true);
+      assert.equal(payload.item.id, id);
+    }
+
+    const mismatchedTaskIds = spawnSync('node', [
+      './bin/mm.mjs',
+      'sprint',
+      'compose',
+      'Broken composed sprint',
+      '--issue-ids',
+      `${issueA},${issueB}`,
+      '--task-ids',
+      taskA,
+    ], {
+      cwd: repoRoot,
+      encoding: 'utf8',
+    });
+    assert.notEqual(mismatchedTaskIds.status, 0);
+    assert.match(`${mismatchedTaskIds.stdout}\n${mismatchedTaskIds.stderr}`, /task id count must match issue count/);
+
+    const composed = spawnSync('node', [
+      './bin/mm.mjs',
+      'sprint',
+      'compose',
+      'Composed bug fix sprint',
+      '--id',
+      sprintId,
+      '--phase-id',
+      phaseId,
+      '--task-ids',
+      `${taskA},${taskB}`,
+      '--issue-ids',
+      `${issueA},${issueB}`,
+      '--phase-title',
+      'Bug fixes',
+      '--success-gates',
+      'composed tasks are linked',
+      '--json',
+    ], {
+      cwd: repoRoot,
+      encoding: 'utf8',
+    });
+    assert.equal(composed.status, 0, composed.stderr);
+    const payload = JSON.parse(composed.stdout);
+    assert.equal(payload.ok, true);
+    assert.equal(payload.sprint.id, sprintId);
+    assert.deepEqual(payload.sprint.issueIds, [issueA, issueB]);
+    assert.deepEqual(payload.sprint.phaseIds, [phaseId]);
+    assert.deepEqual(payload.sprint.taskIds, [taskA, taskB]);
+    assert.equal(payload.phase.id, phaseId);
+    assert.deepEqual(payload.phase.taskIds, [taskA, taskB]);
+    assert.equal(payload.tasks.length, 2);
+    assert.deepEqual(payload.tasks.map(task => task.issueIds[0]), [issueA, issueB]);
+    assert.deepEqual(payload.tasks.map(task => task.acceptanceCriteria[0]), [`Acceptance for ${issueA}`, `Acceptance for ${issueB}`]);
+
+    const lint = spawnSync('node', ['./bin/mm.mjs', 'lint', '--json'], {
+      cwd: repoRoot,
+      encoding: 'utf8',
+    });
+    assert.equal(lint.status, 0, lint.stderr);
+    const lintPayload = JSON.parse(lint.stdout);
+    assert.equal(lintPayload.ok, true);
+  } finally {
+    for (const relPath of generatedPaths) {
+      await fs.rm(path.join(repoRoot, relPath), { force: true });
+    }
+    for (const [relPath, contents] of snapshots.entries()) {
+      const filePath = path.join(repoRoot, relPath);
+      if (contents === null) {
+        await fs.rm(filePath, { force: true });
+      } else {
+        await fs.mkdir(path.dirname(filePath), { recursive: true });
+        await fs.writeFile(filePath, contents, 'utf8');
+      }
+    }
+  }
+});
+
 test('mm ledger inspect and repair are parseable', async () => {
   const ledgerPath = path.join(repoRoot, 'memory', '.tmp-ledger.jsonl');
   await fs.mkdir(path.dirname(ledgerPath), { recursive: true });
@@ -392,6 +651,17 @@ test('mm install supports role selection', () => {
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /Installing 1 role\(s\) as claude/);
   assert.match(result.stdout, /memorymagico-orchestrator/);
+});
+
+test('mm update is shorthand for installing all system role updates', () => {
+  const result = spawnSync('node', ['./bin/mm.mjs', 'update', '--dry-run'], {
+    cwd: repoRoot,
+    encoding: 'utf8',
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /Installing \d+ role\(s\) as all \(dry-run\)/);
+  assert.match(result.stdout, /Claude Code/);
+  assert.match(result.stdout, /Codex/);
 });
 
 test('mm init can bind a repo to a sibling memory workspace', async () => {
@@ -468,7 +738,7 @@ test('mm install can target a top-level agent root with its own project pointer'
     'install',
     'codex',
     '--roles',
-    'memorymagico-orchestrator,memorymagico-retrieval,memorymagico-wiki',
+    'memorymagico-orchestrator,memorymagico-retrieval,memorymagico-wiki,memorymagico-sprint-launcher',
     '--install-root',
     topRoot,
   ], {
@@ -493,6 +763,12 @@ test('mm install can target a top-level agent root with its own project pointer'
     const wikiSkill = await fs.readFile(path.join(topRoot, '.agents', 'skills', 'memorymagico-wiki', 'SKILL.md'), 'utf8');
     assert.match(wikiSkill, /Basis And Competing Truth Check/);
     assert.match(wikiSkill, /Ask before mutating canonical wiki/);
+    const sprintSkill = await fs.readFile(path.join(topRoot, '.agents', 'skills', 'memorymagico-sprint-launcher', 'SKILL.md'), 'utf8');
+    assert.match(sprintSkill, /Tracker Creation Workflow/);
+    assert.match(sprintSkill, /- `mm sprint compose`/);
+    assert.match(sprintSkill, /- `mm sprint create`/);
+    assert.match(sprintSkill, /- `mm phase create`/);
+    assert.match(sprintSkill, /- `mm task create`/);
 
     const info = spawnSync('node', [path.join(repoRoot, 'bin', 'mm.mjs'), 'info'], {
       cwd: topRoot,

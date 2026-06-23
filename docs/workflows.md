@@ -156,7 +156,21 @@ mm issue verify issue_... \
 mm issue close issue_...
 ```
 
-## 7. Context retrieval for agents
+## 7. Compose bug findings into a sprint
+
+After a bug hunt or audit creates multiple issues, compose them into an execution slice without hand-editing tracker files:
+
+```bash
+mm sprint compose "Fix audited CLI workflow gaps" \
+  --issue-ids issue_a,issue_b,issue_c \
+  --phase-title "Workflow fixes" \
+  --success-gates "linked tasks pass targeted tests,mm lint --json is clean" \
+  --json
+```
+
+This creates one sprint, one phase, and one task per issue. The tasks inherit issue acceptance criteria and verification plans when present, and the sprint/phase task id lists are backfilled so lint can validate the tracker graph.
+
+## 8. Context retrieval for agents
 
 Agents should pull context through the CLI rather than recursively reading the repo.
 
@@ -167,7 +181,7 @@ mm context "raw output caps" --deep --json
 mm read memory/wiki/concepts/raw-intake.md --lines 80 --json
 ```
 
-## 8. Maintenance
+## 9. Maintenance
 
 After meaningful memory changes:
 

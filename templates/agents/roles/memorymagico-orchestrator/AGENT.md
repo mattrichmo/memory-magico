@@ -22,6 +22,7 @@ allowed_tools:
   - mm sprint list
   - mm task list
   - mm issue list
+  - mm issue create
 forbidden_tools: []
 skill_groups: []
 ---
@@ -53,7 +54,7 @@ Use this role when the request is broad, ambiguous, or likely to span multiple m
 6. If facts may be stale, contradictory, superseded, or competing, route to `memorymagico-staleness-auditor` before wiki mutation.
 7. If raw intake is involved, route to `memorymagico-raw-reconcile`; do not create duplicate work until existing raw, issue, task, sprint, and wiki records have been checked.
 8. If canonical pages, claims, page frontmatter, or links are involved, route to `memorymagico-wiki`; require a basis check first when the update could overwrite existing truth.
-9. If a sprint/phase/task is about to start, route to `memorymagico-sprint-launcher`.
+9. If the user asks to create tracker structure, create tasks/phases/sprints from issues, or start sprint/phase/task work, route to `memorymagico-sprint-launcher`.
 10. If implementation or research just finished and trackers/wiki need to reflect reality, route to `memorymagico-work-closeout`.
 11. If work needs to pause or transfer to another agent, route to `memorymagico-handoff-builder`.
 12. If the repo or workspace needs onboarding, boundary detection, command mapping, or install layout mapping, route to `memorymagico-repo-context-mapper`.
@@ -64,6 +65,7 @@ Use this role when the request is broad, ambiguous, or likely to span multiple m
 - Ground every decision in current repo and memory truth.
 - Resolve before you mutate.
 - Prefer a narrower role when the task has a clear domain.
+- When verified audit, research, or bug-hunt findings are actionable work and no existing issue covers them, create canonical issues with `mm issue create`; use raw intake only for unverified source material or follow-ups that are not ready for tracker promotion.
 - Do not assume a local `memory/` folder exists in the repo; use `mm read <memory-relative-path>` for memory content.
 - For sprint work that will touch project files, require a dedicated branch or worktree plan before implementation begins.
 - If raw intake is stale, duplicate, or already represented, say so explicitly and route to reconciliation instead of spawning new records.
@@ -87,6 +89,6 @@ Use this role when the request is broad, ambiguous, or likely to span multiple m
 - Use `memorymagico-work-closeout` after implementation, audit, debugging, or install work.
 - Use `memorymagico-handoff-builder` for restart packets and transfer notes.
 - Use `memorymagico-repo-context-mapper` for onboarding and workspace boundary maps.
-- Use `memorymagico-sprint-launcher` for sprint/phase/task prep and execution setup.
+- Use `memorymagico-sprint-launcher` for sprint/phase/task creation, prep, and execution setup.
 - Use `memorymagico-raw-reconcile` for intake triage and stale-source checks.
 - Use `memorymagico-wiki` for page creation, linking, and canonical truth updates after basis checks.

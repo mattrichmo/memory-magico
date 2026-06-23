@@ -10,6 +10,12 @@ import { writeJsonOutput } from '../core/renderers.mjs';
 
 const indexFile = path.join(memoryRoot, 'work', 'sprints', 'index.jsonl');
 const sprintRoot = path.join(memoryRoot, 'work', 'sprints');
+const issueIndexFile = path.join(memoryRoot, 'work', 'issues', 'index.jsonl');
+const issueRoot = path.join(memoryRoot, 'work', 'issues');
+const phaseIndexFile = path.join(memoryRoot, 'work', 'phases', 'index.jsonl');
+const phaseRoot = path.join(memoryRoot, 'work', 'phases');
+const taskIndexFile = path.join(memoryRoot, 'work', 'tasks', 'index.jsonl');
+const taskRoot = path.join(memoryRoot, 'work', 'tasks');
 
 function toIndexRecord(item) {
   return {
@@ -26,6 +32,41 @@ function toIndexRecord(item) {
     createdAt: item.createdAt,
     updatedAt: item.updatedAt,
     completedAt: item.completedAt,
+  };
+}
+
+function toPhaseIndexRecord(item) {
+  return {
+    id: item.id,
+    kind: 'phase',
+    sprintId: item.sprintId,
+    number: item.number,
+    title: item.title,
+    status: item.status,
+    issueIds: item.issueIds,
+    taskIds: item.taskIds,
+    path: item.paths?.self,
+    createdAt: item.createdAt,
+    updatedAt: item.updatedAt,
+    completedAt: item.completedAt,
+  };
+}
+
+function toTaskIndexRecord(item) {
+  return {
+    id: item.id,
+    kind: 'task',
+    title: item.title,
+    status: item.status,
+    sprintId: item.sprintId,
+    phaseId: item.phaseId,
+    issueIds: item.issueIds,
+    containerIds: item.containerIds,
+    path: item.paths?.self,
+    createdAt: item.createdAt,
+    updatedAt: item.updatedAt,
+    completedAt: item.completedAt,
+    history: item.history,
   };
 }
 
@@ -70,6 +111,125 @@ function createSprint(opts) {
   });
 }
 
+function issueTaskTitle(issue, opts) {
+  const prefix = opts['task-prefix'] || 'Fix';
+  return `${prefix} ${issue.title || issue.id}`;
+}
+
+async function composeSprint(opts) {
+  const title = (opts.title || opts._.join(' ')).trim();
+  const issueIds = splitList(opts['issue-ids']);
+  if (!title || !issueIds.length) {
+    console.log('Usage: mm sprint compose <title> --issue-ids issue_a,issue_b [--phase-title "..."] [--goal "..."]');
+    return null;
+  }
+
+  const issues = [];
+  for (const id of issueIds) {
+    const issue = await findRecordById(issueRoot, issueIndexFile, id);
+    if (!issue) throw new Error(`issue not found: ${id}`);
+    issues.push(issue);
+  }
+
+  const now = new Date().toISOString();
+  const sprintId = opts.id || makeId('sprint');
+  const phaseId = opts['phase-id'] || makeId('phase');
+  const sprintStatus = opts.status || 'planned';
+  assertEnum(sprintStatus, ENUMS.sprintStatus, 'sprint status');
+  const requestedTaskIds = opts['task-ids'] ? splitList(opts['task-ids']) : [];
+  if (requestedTaskIds.length && requestedTaskIds.length !== issues.length) {
+    throw new Error('task id count must match issue count when --task-ids is provided');
+  }
+
+  const tasks = issues.map((issue, index) => {
+    const taskId = requestedTaskIds[index] || makeId('task');
+    const acceptanceCriteria = issue.acceptanceCriteria?.length
+      ? issue.acceptanceCriteria
+      : [`Resolve issue ${issue.id}: ${issue.title || issue.id}`];
+    const verificationPlan = issue.verificationPlan?.length
+      ? issue.verificationPlan
+      : [`Run targeted verification for issue ${issue.id}`];
+    return appendHistory({
+      id: taskId,
+      kind: 'task',
+      sprintId,
+      phaseId,
+      issueIds: [issue.id],
+      containerIds: issue.containerIds || [],
+      title: issueTaskTitle(issue, opts),
+      description: issue.description || issue.title || issue.id,
+      status: 'todo',
+      filesAffected: issue.filesAffected || [],
+      acceptanceCriteria,
+      verificationPlan,
+      verificationEvidence: [],
+      blockers: [],
+      createdAt: now,
+      updatedAt: now,
+    }, {
+      at: now,
+      event: 'created',
+      status: 'todo',
+      note: `Created via mm sprint compose from ${issue.id}.`,
+    });
+  });
+
+  const taskIds = tasks.map(task => task.id);
+  const phase = appendHistory({
+    id: phaseId,
+    kind: 'phase',
+    sprintId,
+    number: opts.number ? Number(opts.number) : 1,
+    title: opts['phase-title'] || 'Implementation',
+    description: opts['phase-description'] || `Execute ${title}.`,
+    status: 'planned',
+    issueIds,
+    taskIds,
+    successGates: splitList(opts['phase-success-gates']),
+    createdAt: now,
+    updatedAt: now,
+  }, {
+    at: now,
+    event: 'created',
+    status: 'planned',
+    note: 'Created via mm sprint compose.',
+  });
+
+  const sprint = appendHistory({
+    id: sprintId,
+    kind: 'sprint',
+    title,
+    description: opts.description || title,
+    goal: opts.goal || `Resolve ${issueIds.length} issue${issueIds.length === 1 ? '' : 's'}: ${issues.map(issue => issue.title || issue.id).join('; ')}`,
+    status: sprintStatus,
+    containerIds: splitList(opts['container-ids']),
+    initiativeIds: splitList(opts['initiative-ids']),
+    issueIds,
+    phaseIds: [phaseId],
+    taskIds,
+    successGates: splitList(opts['success-gates']),
+    nonGoals: splitList(opts['non-goals']),
+    paths: {},
+    createdAt: now,
+    updatedAt: now,
+  }, {
+    at: now,
+    event: 'created',
+    status: sprintStatus,
+    note: 'Created via mm sprint compose.',
+  });
+
+  await assertEntityListExists(sprint.containerIds, 'container', 'container');
+  await assertEntityListExists(sprint.initiativeIds, 'initiative', 'initiative');
+  await persistSprint(sprint);
+  await persistRecord(phaseRoot, phaseIndexFile, phase, toPhaseIndexRecord);
+  for (const task of tasks) {
+    await persistRecord(taskRoot, taskIndexFile, task, toTaskIndexRecord);
+  }
+
+  return { sprint, phase, tasks, issues };
+}
+
 async function loadSprint(id) {
   return findRecordById(sprintRoot, indexFile, id);
 }
@@ -88,15 +248,25 @@ export async function run(argv) {
     await assertEntityListExists(sprint.containerIds, 'container', 'container');
     await assertEntityListExists(sprint.initiativeIds, 'initiative', 'initiative');
     await assertEntityListExists(sprint.issueIds, 'issue', 'issue');
-    await assertEntityListExists(sprint.containerIds, 'container', 'container');
-    await assertEntityListExists(sprint.initiativeIds, 'initiative', 'initiative');
-    await assertEntityListExists(sprint.issueIds, 'issue', 'issue');
     await persistSprint(sprint);
     if (json) {
       writeJsonOutput({ ok: true, item: sprint });
       return;
     }
     console.log('Created sprint:', sprint.id);
+    return;
+  }
+
+  if (sub === 'compose') {
+    const result = await composeSprint(parseArgs(argv, 2));
+    if (!result) return;
+    if (json) {
+      writeJsonOutput({ ok: true, ...result });
+      return;
+    }
+    console.log('Created sprint:', result.sprint.id);
+    console.log('Created phase:', result.phase.id);
+    result.tasks.forEach(task => console.log('Created task:', task.id));
     return;
   }
 

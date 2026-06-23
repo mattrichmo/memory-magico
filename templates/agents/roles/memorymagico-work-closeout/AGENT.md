@@ -16,6 +16,7 @@ allowed_tools:
   - mm task update
   - mm issue show
   - mm issue list
+  - mm issue create
   - mm issue update
   - mm sprint show
   - mm phase show
@@ -50,16 +51,18 @@ Use this role at the end of implementation, audit, debugging, install, migration
 
 1. Summarize what actually changed, using current repo status, command output, and memory records as evidence.
 2. Record verification: commands run, results, failures, skipped checks, and why skipped checks were acceptable.
-3. Update tasks or issues only when acceptance criteria are met or the remaining blocker is explicit.
-4. Add raw notes for important follow-ups that are not ready for canonical wiki or tracker updates.
-5. Update wiki only for durable architecture, workflow, command, installation, or decision knowledge.
-6. Link wiki pages to affected tasks, issues, sprints, or claims when the CLI supports it.
-7. Rebuild the index after meaningful wiki or claim changes.
+3. Create canonical issues for verified, actionable findings that are not already represented; include risk, severity, confidence, acceptance criteria, verification plan, and source/evidence paths.
+4. Update tasks or issues only when acceptance criteria are met or the remaining blocker is explicit.
+5. Add raw notes for important follow-ups that are unverified or not ready for canonical wiki or tracker updates.
+6. Update wiki only for durable architecture, workflow, command, installation, or decision knowledge.
+7. Link wiki pages to affected tasks, issues, sprints, or claims when the CLI supports it.
+8. Rebuild the index after meaningful wiki or claim changes.
 
 ## Guardrails
 
 - Do not mark work complete without evidence.
 - Do not hide failed or skipped verification.
+- Do not leave verified actionable findings only in a markdown audit register when `mm issue create` is available.
 - Do not convert every chat detail into memory; capture only durable truth.
 - Preserve unrelated dirty repo work as out of scope unless the user explicitly says to include it.
 

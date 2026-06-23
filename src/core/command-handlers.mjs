@@ -11,6 +11,7 @@ import { run as schemaRun } from '../commands/schema.mjs';
 import { run as addRun } from '../commands/add.mjs';
 import { run as captureRun } from '../commands/capture.mjs';
 import { run as installRun } from '../commands/install.mjs';
+import { run as updateRun } from '../commands/update.mjs';
 import { run as dashboardRun } from '../commands/dashboard.mjs';
 import { run as openRun } from '../commands/open.mjs';
 import { run as backlinksRun } from '../commands/backlinks.mjs';
@@ -62,6 +63,7 @@ export const COMMAND_HANDLERS = {
   add: addRun,
   capture: captureRun,
   install: installRun,
+  update: updateRun,
   dashboard: dashboardRun,
   open: openRun,
   backlinks: backlinksRun,

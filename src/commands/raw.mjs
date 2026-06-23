@@ -17,6 +17,15 @@ import { detectPromptMarkers } from '../core/prompt-markers.mjs';
 const rawFile = path.join(memoryRoot, 'inbox', 'raw-items.jsonl');
 const rawDir = path.join(memoryRoot, 'inbox', 'raw');
 
+function usage() {
+  console.log('Usage: mm raw <add|add-image|list|list-all|show|process|reject|archive|cleanup> ...');
+}
+
+function addUsage() {
+  console.log('Usage: mm raw add <text> | mm raw add --text <text> | mm raw add --stdin');
+  console.log('Tip: use --text or --stdin for pasted content with shell metacharacters.');
+}
+
 async function readStdinText() {
   if (process.stdin.isTTY) return '';
   return new Promise((resolve, reject) => {
@@ -134,7 +143,16 @@ export async function run(argv) {
   const sub = argv[1] || 'list';
   const json = argv.includes('--json');
 
+  if (sub === 'help' || sub === '--help' || sub === '-h') {
+    usage();
+    return;
+  }
+
   if (sub === 'add') {
+    if (argv.includes('--help') || argv.includes('-h')) {
+      addUsage();
+      return;
+    }
     return withLock('raw-ingest', async () => {
       const opts = argv.slice(2);
       const textFlagIndex = opts.indexOf('--text');
@@ -145,8 +163,7 @@ export async function run(argv) {
       const stdinText = stdinRequested || (!explicitText && !positionalText && !process.stdin.isTTY) ? await readStdinText() : '';
       const text = String(explicitText || stdinText || positionalText || '').trim();
       if (!text) {
-        console.log('Usage: mm raw add <text> | mm raw add --text <text> | mm raw add --stdin');
-        console.log('Tip: use --text or --stdin for pasted content with shell metacharacters.');
+        addUsage();
         return;
       }
 
@@ -408,5 +425,5 @@ export async function run(argv) {
   }
 
   console.log('Unknown raw subcommand:', sub);
-  console.log('Available: add, list, list-all, show, process, reject, archive, cleanup');
+  usage();
 }

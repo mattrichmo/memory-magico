@@ -15,7 +15,7 @@ Most read commands support `--json`; agents should use it when parsing results p
 
 ```bash
 mm init [--yes|-y] [--project-root <path>] [--memory-root <path>] [--install-root <path>] [--separate-git|--in-repo-memory] [--force] [--skip-agent-install]
-mm doctor [--json]
+mm doctor [--json] [--fix]
 mm lint [--json]
 mm ledger inspect <path> [--tail N] [--json]
 mm ledger repair <path> [--quarantine-bad-lines] [--dry-run] [--json]
@@ -27,7 +27,7 @@ mm schema validate <schema-file> [data-file]
 | Command | Description |
 |---|---|
 | `mm init` | Interactive wizard (in a terminal) for creating the memory workspace scaffold, writing `.memorymagico.json` into the selected repo, and installing optional generated agent surfaces. |
-| `mm doctor` | Validates that the expected scaffold exists. |
+| `mm doctor` | Validates that the expected scaffold exists; `--fix` creates missing scaffold files. |
 | `mm lint` | Runs schema, referential, and lifecycle invariant checks. |
 | `mm ledger` | Inspects or repairs JSON/JSONL ledgers; repair can quarantine malformed lines. |
 | `mm schema` | Lists, shows, or validates schema definitions. |
@@ -45,6 +45,8 @@ mm context <id-or-query> [--deep] [--json]
 mm read <path> [--offset N] [--lines N] [--max-bytes N] [--json] [--binary-info]
 mm results list [--json]
 mm results show <id> [--json]
+mm results prune --older-than 30d
+mm results prune --all --yes
 ```
 
 | Command | Description |
@@ -54,7 +56,7 @@ mm results show <id> [--json]
 | `mm resolve` | Resolves human references, titles, aliases, or IDs to memory entities. |
 | `mm context` | Returns focused context for a target entity or query. |
 | `mm read` | Reads bounded file ranges with line and byte caps. |
-| `mm results` | Lists or reads spooled large results. |
+| `mm results` | Lists, reads, or prunes spooled large results. |
 
 ## Wiki
 
@@ -103,7 +105,7 @@ Raw intake captures source material before anyone decides what it means. Treat i
 ```bash
 mm container list|show|create|update|archive
 mm initiative list|show|create|update
-mm sprint list|show|create|update
+mm sprint list|show|create|update|compose
 mm phase list|show|create|update
 mm task list|show|create|update|complete
 mm issue list|show|create|update|close|link-pr|verify|block|unblock
@@ -141,6 +143,11 @@ mm issue create "JSONL lint passes malformed files" \
   --risk "Malformed ledgers can appear clean" \
   --acceptance "bad JSONL returns non-zero lint" \
   --verification "inject malformed row and run mm lint --json"
+
+mm sprint compose "Fix discovered CLI bugs" \
+  --issue-ids issue_...,issue_... \
+  --phase-title "Bug fixes" \
+  --success-gates "all linked tasks have verification evidence"
 
 mm discovery create "Raw command prints full payloads" \
   --summary "Raw output should have byte and line caps" \
@@ -191,6 +198,7 @@ Generates or serves a local view over MemoryMagico data. Defaults to binding `12
 
 ```bash
 mm install claude|codex|all [--roles role_a,role_b] [--install-root <path>] [--dry-run] [--update]
+mm update [--roles role_a,role_b] [--install-root <path>] [--dry-run]
 ```
 
 ```bash
@@ -199,9 +207,10 @@ mm install claude --roles memorymagico-orchestrator
 mm install codex --roles memorymagico-sprint-launcher --dry-run
 mm install all --install-root ..
 mm install all --update
+mm update
 ```
 
-Bundled system roles (`memorymagico-*`) are seeded into `memory/agents/roles/` the first time they're missing. `--update` force-refreshes only those system roles from the installed package and regenerates their agent surfaces — custom roles you've added are never touched. `mm init` offers this as a wizard step and always installs only `memorymagico-orchestrator` for Claude Code by default. See [docs/agent-system.md](docs/agent-system.md) for role definitions and rules.
+Bundled system roles (`memorymagico-*`) are seeded into `memory/agents/roles/` the first time they're missing. `--update` force-refreshes only those system roles from the installed package and regenerates their agent surfaces — custom roles you've added are never touched. `mm update` is shorthand for `mm install all --update`. `mm init` offers this as a wizard step and always installs only `memorymagico-orchestrator` for Claude Code by default. See [docs/agent-system.md](docs/agent-system.md) for role definitions and rules.
 
 When a repo uses a sibling memory workspace, `mm install` reads role sources from the configured `memoryRoot` in `.memorymagico.json`. By default it writes generated `.claude/` or `.agents/` files into the configured project root. Use `--install-root <path>` to write those files into a top-level folder beside both `memory/` and the project repo; MemoryMagico writes a matching `.memorymagico.json` there so global `mm` commands resolve the same workspace.
 

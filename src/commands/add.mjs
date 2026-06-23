@@ -73,7 +73,7 @@ export async function run(argv) {
   return withLock('raw-ingest', async () => {
     // argv[0] = 'add', argv[1] = filepath, rest = flags
     const filepath = argv[1];
-    if (!filepath) {
+    if (!filepath || filepath === '--help' || filepath === '-h') {
       console.log('Usage: mm add <filepath> [--title "..."] [--source-type <type>] [--tags tag1,tag2]');
       console.log('');
       console.log('Copies any file into memory/inbox/raw/ and registers it as a raw item.');
