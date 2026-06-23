@@ -33,6 +33,10 @@ export function validateRoleContract(role) {
       findings.push(`allowed_tools contains an empty entry for ${role.slug || 'unknown role'}`);
       continue;
     }
+    if (text.startsWith('qm ') || text.startsWith('./qm')) {
+      findings.push(`legacy Quarter Memory command in allowed_tools: ${text}`);
+      continue;
+    }
     const parsed = parseMmTool(text);
     if (parsed?.command && !getCommand(parsed.command)) {
       findings.push(`unknown mm command in allowed_tools: ${text}`);

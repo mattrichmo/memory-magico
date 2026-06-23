@@ -65,6 +65,7 @@ export async function listRecords(dirPath) {
       // Lint reports bad JSON with file context.
     }
   }
+  const jsonIds = new Set(records.map(record => record?.id).filter(Boolean));
   const markdownDir = markdownMirrorDir(dirPath);
   if (markdownDir) {
     const markdownFiles = await readDirRecursive(markdownDir, { filter: filePath => filePath.endsWith('.md') });
@@ -73,6 +74,7 @@ export async function listRecords(dirPath) {
         const parsed = parseMarkdownPage(await readFile(file, 'utf8'));
         const fm = parsed.frontmatter || {};
         if (!fm.id) continue;
+        if (jsonIds.has(fm.id)) continue;
         records.push(markdownPageToRecord(fm, file));
       } catch {
         // markdown parse errors are linted elsewhere
@@ -104,6 +106,12 @@ export async function upsertIndexRecord(indexFile, record, toIndexRecord = item 
 
 export async function findRecordById(dirPath, indexFile, id) {
   assertSafePathSegment(id, 'record id');
+  const filePath = await resolveRecordJsonPath(dirPath, id, PATH_POLICIES.MEMORY_READ);
+  try {
+    return await readJsonFile(filePath);
+  } catch {
+    // Fall through to markdown and index records.
+  }
   const markdownDir = markdownMirrorDir(dirPath);
   if (markdownDir) {
     const markdownFiles = await readDirRecursive(markdownDir, { filter: filePath => filePath.endsWith('.md') });
@@ -117,27 +125,54 @@ export async function findRecordById(dirPath, indexFile, id) {
       }
     }
   }
-  const filePath = await resolveRecordJsonPath(dirPath, id, PATH_POLICIES.MEMORY_READ);
-  try {
-    return await readJsonFile(filePath);
-  } catch {
-    const items = await readLatestIndex(indexFile);
-    return items.find(item => item.id === id) || null;
-  }
+  const items = await readLatestIndex(indexFile);
+  return items.find(item => item.id === id) || null;
 }
 
 export async function persistRecord(dirPath, indexFile, record, toIndexRecord = item => item) {
   assertSafePathSegment(record?.id, 'record id');
   if (record?.kind) assertSafePathSegment(record.kind, 'record kind', { allowDot: false });
-  const markdownPath = await mirrorRecordToMarkdown(record);
-  if (markdownPath) {
+  const jsonPath = await existingJsonRecordPath(dirPath, record);
+  if (jsonPath) {
+    const markdownPath = await mirrorRecordToMarkdown(record);
     record.paths = {
       ...(record.paths || {}),
-      self: path.relative(memoryRoot, markdownPath),
-      markdown: path.relative(memoryRoot, markdownPath),
+      self: path.relative(memoryRoot, jsonPath).split(path.sep).join('/'),
+      ...(markdownPath ? { markdown: path.relative(memoryRoot, markdownPath).split(path.sep).join('/') } : {}),
     };
+    await writeJsonFile(jsonPath, record);
+  } else {
+    const markdownPath = await mirrorRecordToMarkdown(record);
+    if (markdownPath) {
+      record.paths = {
+        ...(record.paths || {}),
+        self: path.relative(memoryRoot, markdownPath).split(path.sep).join('/'),
+        markdown: path.relative(memoryRoot, markdownPath).split(path.sep).join('/'),
+      };
+    }
   }
   await upsertIndexRecord(indexFile, record, toIndexRecord);
+}
+
+async function existingJsonRecordPath(dirPath, record) {
+  const existingSelf = record?.paths?.self;
+  if (existingSelf && String(existingSelf).endsWith('.json')) {
+    try {
+      const normalizedSelf = String(existingSelf).replace(/^memory\//, '');
+      const resolved = await resolveContainedPath(memoryRoot, normalizedSelf, PATH_POLICIES.MEMORY_WRITE);
+      if (path.dirname(resolved) === path.resolve(dirPath)) return resolved;
+    } catch {
+      // Fall back to the default id-based path.
+    }
+  }
+
+  const filePath = await resolveRecordJsonPath(dirPath, record.id, PATH_POLICIES.MEMORY_WRITE);
+  try {
+    await fs.access(filePath);
+    return filePath;
+  } catch {
+    return null;
+  }
 }
 
 function compareRecords(a, b) {

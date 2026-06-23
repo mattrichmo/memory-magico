@@ -147,7 +147,7 @@ export async function entityRefExists(nodeRef) {
     return resolved ? exists(resolved) : false;
   }
 
-  if (['github_issue', 'github_pr', 'commit', 'concept', 'decision', 'source'].includes(nodeRef.kind)) {
+  if (['github_issue', 'github_pr', 'commit', 'concept', 'decision', 'relationship', 'source'].includes(nodeRef.kind)) {
     return true;
   }
 

@@ -292,7 +292,7 @@ export const COMMANDS = [
     aliases: [],
     category: 'view',
     summary: 'Build or serve the dashboard.',
-    description: 'Generates or serves the memory dashboard.',
+    description: 'Generates or serves the memory dashboard. Serving defaults to the v2 UI; pass `1` (or --v1) to serve the original.',
     readOnly: false,
     destructive: false,
     concurrencySafe: false,
@@ -303,7 +303,7 @@ export const COMMANDS = [
     acceptsHumanRef: false,
     acceptsPaths: false,
     maxResultSizeChars: 20000,
-    examples: ['mm dashboard build', 'mm dashboard serve'],
+    examples: ['mm dashboard build', 'mm dashboard serve', 'mm dashboard 1'],
   },
   {
     name: 'open',

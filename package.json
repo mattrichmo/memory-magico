@@ -23,6 +23,7 @@
   "files": [
     "bin/",
     "dashboard/",
+    "dashboard-v2/",
     "memory/",
     "mm",
     "src/",

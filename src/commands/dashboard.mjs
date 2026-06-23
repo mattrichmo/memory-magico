@@ -3,7 +3,7 @@ import http from 'http';
 import path from 'path';
 import { spawn } from 'child_process';
 import { parseArgs } from '../core/cli.mjs';
-import { memoryRoot, toolRoot } from '../core/paths.mjs';
+import { memoryRoot, repoRoot, toolRoot } from '../core/paths.mjs';
 import { buildDashboardData } from '../core/dashboard-data.mjs';
 import { writeJsonFile } from '../core/json.mjs';
 import { listRecords, readLatestIndex } from '../core/records.mjs';
@@ -17,7 +17,16 @@ import { listDashboardRoutes } from '../core/dashboard-contracts.mjs';
 import { getCommand } from '../core/command-registry.mjs';
 import { resolveSubcommandContract } from '../core/subcommand-registry.mjs';
 
-const dashboardRoot = path.join(toolRoot, 'dashboard');
+// Two dashboard UIs ship with the tool. v2 is the default; `mm dashboard 1`
+// (or --v1) serves the original. Both are served by this same API server.
+const DASHBOARD_ROOTS = {
+  1: path.join(toolRoot, 'dashboard'),
+  2: path.join(toolRoot, 'dashboard-v2'),
+};
+const DEFAULT_DASHBOARD_VERSION = 2;
+// Active root for static serving. run() sets this from the parsed version before
+// the server starts; serveStatic falls back to it when no root is passed.
+let activeDashboardRoot = DASHBOARD_ROOTS[DEFAULT_DASHBOARD_VERSION];
 const defaultPort = 4317;
 const gitStatusTtlMs = 5000;
 let gitStatusCache = null;
@@ -139,8 +148,12 @@ function validateCommandPayload(payload) {
 
 function runCliCommand(args) {
   return new Promise(resolve => {
+    // Pin executed commands to the workspace the dashboard is serving, not the
+    // tool's own repo. Otherwise the child re-resolves a different workspace
+    // from toolRoot and mutations land in the wrong memory/ store.
     const child = spawn(process.execPath, [path.join(toolRoot, 'bin', 'mm.mjs'), ...args], {
-      cwd: toolRoot,
+      cwd: repoRoot,
+      env: { ...process.env, MEMORYMAGICO_MEMORY_ROOT: memoryRoot },
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     let stdout = '';
@@ -169,16 +182,16 @@ function normalizePathname(urlPath) {
   }
 }
 
-export async function serveStatic(reqPath, res) {
+export async function serveStatic(reqPath, res, root = activeDashboardRoot) {
   const decoded = normalizePathname(reqPath);
   if (!decoded) {
     sendText(res, 400, 'Bad request');
     return;
   }
   const relative = decoded === '/' ? 'index.html' : decoded.replace(/^\/+/, '');
-  const filePath = path.join(dashboardRoot, relative);
+  const filePath = path.join(root, relative);
   const resolved = path.resolve(filePath);
-  const outside = path.relative(dashboardRoot, resolved);
+  const outside = path.relative(root, resolved);
   if (outside.startsWith('..') || path.isAbsolute(outside)) {
     sendText(res, 403, 'Forbidden');
     return;
@@ -451,9 +464,17 @@ export async function handleApi(pathname, searchParams, res, req = null) {
   sendJson(res, 404, { ok: false, error: { code: 'NOT_FOUND', message: 'Unknown dashboard API route.' } });
 }
 
+function resolveDashboardVersion(opts) {
+  const positionals = opts._ || [];
+  if (positionals.includes('1') || opts.v1 || String(opts.version) === '1') return 1;
+  if (positionals.includes('2') || opts.v2 || String(opts.version) === '2') return 2;
+  return DEFAULT_DASHBOARD_VERSION;
+}
+
 export async function run(argv) {
   const opts = parseArgs(argv, 1);
-  const sub = argv[1] || 'serve';
+  const positionals = opts._ || [];
+  const sub = positionals.includes('build') ? 'build' : 'serve';
 
   if (sub === 'build') {
     const outFile = path.join(memoryRoot, 'generated', 'dashboard.json');
@@ -465,6 +486,17 @@ export async function run(argv) {
     console.log(`Built dashboard snapshot: ${path.relative(toolRoot, outFile)}`);
     return;
   }
+
+  const version = resolveDashboardVersion(opts);
+  const dashboardRoot = DASHBOARD_ROOTS[version];
+  try {
+    await fs.access(path.join(dashboardRoot, 'index.html'));
+  } catch {
+    console.error(`Dashboard v${version} is not available (missing ${path.relative(toolRoot, dashboardRoot)}/index.html).`);
+    process.exitCode = 1;
+    return;
+  }
+  activeDashboardRoot = dashboardRoot;
 
   const port = Number(opts.port || defaultPort);
   const host = String(opts.host || '127.0.0.1');
@@ -509,7 +541,11 @@ export async function run(argv) {
     const address = server.address();
     const actualPort = typeof address === 'object' && address ? address.port : port;
     const actualUrl = `http://${host}:${actualPort}`;
-    console.log(`MemoryMagico dashboard running at ${actualUrl}`);
+    console.log(`MemoryMagico dashboard (v${version}) running at ${actualUrl}`);
+    if (version === 2) {
+      console.log('Note: v2 currently renders bundled fixture data (dashboard-v2/data.js), not the live workspace.');
+    }
+    console.log(version === 1 ? 'Tip: this is the original UI; omit "1" (or pass 2) for the new dashboard.' : 'Tip: pass `1` (e.g. `mm dashboard 1`) to launch the original UI.');
     console.log('Press Ctrl+C to stop.');
     if (!noOpen) maybeOpenBrowser(actualUrl);
   });

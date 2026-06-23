@@ -20,6 +20,8 @@ import { makeId } from '../src/core/ids.mjs';
 import { resolveRecordJsonPath } from '../src/core/records.mjs';
 import { mirrorRecordToMarkdown } from '../src/core/work-pages.mjs';
 import { handleApi, serveStatic } from '../src/commands/dashboard.mjs';
+import { importLegacyEntityRecords } from '../src/core/migrations.mjs';
+import { validateRoleContract } from '../src/core/role-contracts.mjs';
 
 const repoRoot = path.dirname(fileURLToPath(new URL('../package.json', import.meta.url)));
 
@@ -92,6 +94,17 @@ test('subcommand contracts cover core workflow and lock semantics', () => {
   assert.equal(resolveSubcommandContract('doctor', ['doctor', '--fix']).lockScope, 'repo-write');
   assert.ok(toolsForRoleTags(['work.issue.create']).includes('mm issue create'));
   assert.ok(toolsForRoleTags(['work.sprint.compose']).includes('mm sprint compose'));
+});
+
+test('role contracts reject legacy qm command tools', () => {
+  const findings = validateRoleContract({
+    slug: 'memorymagico-test',
+    allowedTools: ['qm issue create'],
+    allowedCapabilities: [],
+    forbiddenTools: [],
+    skillGroups: [],
+  });
+  assert.ok(findings.some(finding => finding.includes('legacy Quarter Memory command')));
 });
 
 test('mm commands exposes subcommand contracts', () => {
@@ -798,6 +811,67 @@ test('mm sprint compose creates linked sprint phase and tasks from issues', asyn
   }
 });
 
+test('legacy entity importer copies old JSON records into work JSON without losing shape', async () => {
+  const suffix = makeId('legacy').replace(/^legacy_/, '');
+  const id = `sprint_legacy_${suffix}`;
+  const legacyDir = path.join(repoRoot, 'memory/sprints/items');
+  const legacyFile = path.join(legacyDir, `${id}.json`);
+  const workJson = path.join(repoRoot, 'memory/work/sprints', `${id}.json`);
+  const workMarkdown = path.join(repoRoot, 'memory/work/sprints', `${id}.md`);
+  const indexFile = path.join(repoRoot, 'memory/work/sprints/index.jsonl');
+  const indexSnapshot = await fs.readFile(indexFile, 'utf8').catch(() => null);
+
+  try {
+    await fs.mkdir(legacyDir, { recursive: true });
+    await fs.rm(workJson, { force: true });
+    await fs.rm(workMarkdown, { force: true });
+    await fs.writeFile(legacyFile, JSON.stringify({
+      id,
+      kind: 'sprint',
+      title: 'Legacy imported sprint',
+      description: 'Old sprint JSON shape',
+      goal: 'Keep the old arrays visible after import',
+      status: 'planned',
+      phaseIds: ['phase_legacy_a'],
+      taskIds: ['task_legacy_a'],
+      successGates: ['import succeeds'],
+      paths: {
+        self: `memory/sprints/items/${id}.json`,
+      },
+      createdAt: '2026-06-23T00:00:00.000Z',
+      updatedAt: '2026-06-23T00:00:00.000Z',
+    }, null, 2), 'utf8');
+
+    const result = await importLegacyEntityRecords({ kinds: ['sprint'], rebuild: false });
+    assert.equal(result.imported.sprint, 1);
+    assert.equal(result.totalImported, 1);
+
+    const imported = JSON.parse(await fs.readFile(workJson, 'utf8'));
+    assert.equal(imported.id, id);
+    assert.deepEqual(imported.phaseIds, ['phase_legacy_a']);
+    assert.deepEqual(imported.taskIds, ['task_legacy_a']);
+    assert.equal(imported.paths.self, `work/sprints/${id}.json`);
+    assert.equal(imported.paths.markdown, `work/sprints/${id}.md`);
+    assert.equal(imported.paths.legacySelf, `memory/sprints/items/${id}.json`);
+    assert.match(await fs.readFile(workMarkdown, 'utf8'), /Legacy imported sprint/);
+
+    const shown = spawnSync('node', ['./bin/mm.mjs', 'sprint', 'show', id, '--json'], {
+      cwd: repoRoot,
+      encoding: 'utf8',
+    });
+    assert.equal(shown.status, 0, shown.stderr);
+    const payload = JSON.parse(shown.stdout);
+    assert.deepEqual(payload.item.phaseIds, ['phase_legacy_a']);
+    assert.equal(payload.item.paths.self, `work/sprints/${id}.json`);
+  } finally {
+    await fs.rm(legacyFile, { force: true });
+    await fs.rm(workJson, { force: true });
+    await fs.rm(workMarkdown, { force: true });
+    if (indexSnapshot === null) await fs.rm(indexFile, { force: true });
+    else await fs.writeFile(indexFile, indexSnapshot, 'utf8');
+  }
+});
+
 test('mm ledger inspect and repair are parseable', async () => {
   const ledgerPath = path.join(repoRoot, 'memory', '.tmp-ledger.jsonl');
   await fs.mkdir(path.dirname(ledgerPath), { recursive: true });
@@ -963,6 +1037,42 @@ test('mm install can target a top-level agent root with its own project pointer'
     assert.equal(info.status, 0, info.stderr);
     assert.match(info.stdout, /Project config:/);
     assert.match(info.stdout, /Workspace id:/);
+  } finally {
+    await fs.rm(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test('mm install outputs do not reference legacy qm commands', async () => {
+  const tempRoot = await fs.mkdtemp(path.join('/tmp', 'mm-install-legacy-command-'));
+  try {
+    const install = spawnSync('node', [
+      path.join(repoRoot, 'bin', 'mm.mjs'),
+      'install',
+      'all',
+      '--roles',
+      'memorymagico-orchestrator,memorymagico-sprint-launcher',
+      '--install-root',
+      tempRoot,
+    ], {
+      cwd: repoRoot,
+      encoding: 'utf8',
+    });
+    assert.equal(install.status, 0, install.stderr);
+
+    const generatedFiles = [
+      path.join(tempRoot, '.claude', 'agents', 'memorymagico-orchestrator.md'),
+      path.join(tempRoot, '.claude', 'commands', 'memorymagico-orchestrator.md'),
+      path.join(tempRoot, '.agents', 'skills', 'memorymagico-orchestrator', 'SKILL.md'),
+      path.join(tempRoot, '.claude', 'agents', 'memorymagico-sprint-launcher.md'),
+      path.join(tempRoot, '.claude', 'commands', 'memorymagico-sprint-launcher.md'),
+      path.join(tempRoot, '.agents', 'skills', 'memorymagico-sprint-launcher', 'SKILL.md'),
+    ];
+
+    for (const file of generatedFiles) {
+      const content = await fs.readFile(file, 'utf8');
+      assert.doesNotMatch(content, /(^|[` \n])\.?\/?qm\s/m, `${file} references a legacy qm command`);
+      assert.doesNotMatch(content, /Quarter Memory/, `${file} references the legacy product name`);
+    }
   } finally {
     await fs.rm(tempRoot, { recursive: true, force: true });
   }

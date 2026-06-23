@@ -66,10 +66,15 @@ async function lintRawItems(errors, warnings) {
   const items = await readJsonl(path.join(memoryRoot, 'inbox', 'raw-items.jsonl'));
   for (const [index, item] of items.entries()) {
     const prefix = `memory/inbox/raw-items.jsonl:${index + 1}`;
-    validateAgainstSchema(schema, item).forEach(msg => errors.push(`${prefix}: ${msg}`));
-    if (item.status === 'processed' && item.reconciledTo) {
-      for (const ref of item.reconciledTo) {
-        if (!(await entityRefExists(ref))) errors.push(`${prefix}: processed target missing (${ref.kind} ${ref.id || ref.path})`);
+    const normalized = normalizeRawItemForLint(item);
+    validateAgainstSchema(schema, normalized).forEach(msg => errors.push(`${prefix}: ${msg}`));
+    if (normalized.status === 'processed' && normalized.reconciledTo) {
+      for (const ref of normalized.reconciledTo) {
+        if (!(await entityRefExists(ref))) {
+          const message = `${prefix}: processed target missing (${ref.kind} ${ref.id || ref.path})`;
+          if (isLegacyRawItem(item)) warnings.push(message);
+          else errors.push(message);
+        }
       }
     }
   }
@@ -80,11 +85,23 @@ async function lintStructuredRecords(errors, warnings, bag) {
   const registerRecord = (record, rel, sourceType, label) => {
     if (!record?.id) return;
     const entry = seenIds.get(record.id) || { markdown: null, json: null, other: null };
+    if (sourceType === 'markdown' && entry.json && isMarkdownMirrorForJson(record, rel, entry.jsonRecord)) {
+      entry.markdown = rel;
+      seenIds.set(record.id, entry);
+      return 'mirror';
+    }
+    if (sourceType === 'json' && entry.markdownRecord && isMarkdownMirrorForJson(entry.markdownRecord, entry.markdown, record)) {
+      entry.json = rel;
+      entry.jsonRecord = record;
+      seenIds.set(record.id, entry);
+      return 'registered';
+    }
     if (entry[sourceType]) {
       errors.push(`${rel}: duplicate record id ${record.id} already seen in ${entry[sourceType]}`);
-      return;
+      return 'duplicate';
     }
     entry[sourceType] = rel;
+    entry[`${sourceType}Record`] = record;
     seenIds.set(record.id, entry);
     if (label !== 'discoveries') {
       const known = [entry.markdown, entry.json, entry.other].filter(Boolean);
@@ -93,71 +110,11 @@ async function lintStructuredRecords(errors, warnings, bag) {
         errors.push(`${rel}: duplicate record id ${record.id} already seen in ${previous}`);
       }
     }
+    return 'registered';
   };
 
   for (const check of checks) {
     const schema = await loadSchema(check.schema);
-    for (const entry of await readDirRecords(check.dir)) {
-      const rel = repoRelative(entry.file);
-      const page = await readMarkdownPage(entry.file);
-      if (page.errors?.length) {
-        errors.push(`${rel}: invalid markdown (${page.errors.join('; ')})`);
-        continue;
-      }
-      const record = page.frontmatter || {};
-      bag[check.label].push(record);
-      registerRecord(record, rel, 'markdown', check.label);
-      validateAgainstSchema(schema, record).forEach(message => errors.push(`${rel}: ${message}`));
-
-      if (check.label === 'initiatives') {
-        await validateIdList(errors, warnings, rel, record.containerIds, 'container', 'warning');
-        await validateIdList(errors, warnings, rel, record.sprintIds, 'sprint');
-        await validateIdList(errors, warnings, rel, record.issueIds, 'issue');
-      }
-      if (check.label === 'issues') {
-        await validateIdList(errors, warnings, rel, record.containerIds, 'container', 'warning');
-        await validateIdList(errors, warnings, rel, record.initiativeIds, 'initiative');
-        await validateIdList(errors, warnings, rel, record.sourceDiscoveryIds, 'discovery');
-        await validateIdList(errors, warnings, rel, record.sourceCommentIds, 'comment');
-        await validateIdList(errors, warnings, rel, record.dependencies?.blockedByIssueIds, 'issue');
-        if (record.status === 'ready_for_agent' && (!needMeaningful(record.acceptanceCriteria) || !needMeaningful(record.verificationPlan) || !record.risk || record.risk === 'TBD')) {
-          errors.push(`${rel}: ready_for_agent requires risk, acceptanceCriteria, and verificationPlan`);
-        }
-        if (['verified', 'closed'].includes(record.status) && !needEvidence(record)) {
-          errors.push(`${rel}: ${record.status} issue requires verificationEvidence`);
-        }
-      }
-      if (check.label === 'comments') {
-        if (!record.target || !(await entityRefExists(record.target))) errors.push(`${rel}: comment target missing`);
-        if (record.containerId) await validateIdList(errors, warnings, rel, [record.containerId], 'container', 'warning');
-        await validateIdList(errors, warnings, rel, record.relatedDiscoveryIds, 'discovery');
-        await validateIdList(errors, warnings, rel, record.relatedIssueIds, 'issue');
-      }
-      if (check.label === 'sprints') {
-        await validateIdList(errors, warnings, rel, record.initiativeIds, 'initiative');
-        await validateIdList(errors, warnings, rel, record.containerIds, 'container', 'warning');
-        await validateIdList(errors, warnings, rel, record.issueIds, 'issue');
-        await validateIdList(errors, warnings, rel, record.phaseIds, 'phase', 'warning');
-        await validateIdList(errors, warnings, rel, record.taskIds, 'task', 'warning');
-        if (record.status === 'completed' && !needMeaningful(record.successGates)) errors.push(`${rel}: completed sprint requires successGates`);
-      }
-      if (check.label === 'phases') {
-        await validateIdList(errors, warnings, rel, [record.sprintId], 'sprint');
-        await validateIdList(errors, warnings, rel, record.issueIds, 'issue');
-        await validateIdList(errors, warnings, rel, record.taskIds, 'task', 'warning');
-        if (record.status === 'completed' && !needMeaningful(record.successGates)) errors.push(`${rel}: completed phase requires successGates`);
-      }
-      if (check.label === 'tasks') {
-        await validateIdList(errors, warnings, rel, [record.sprintId], 'sprint');
-        if (record.phaseId) await validateIdList(errors, warnings, rel, [record.phaseId], 'phase');
-        await validateIdList(errors, warnings, rel, record.issueIds, 'issue');
-        await validateIdList(errors, warnings, rel, record.containerIds, 'container', 'warning');
-        if (record.status === 'in_progress' && (!needMeaningful(record.acceptanceCriteria) || !needMeaningful(record.verificationPlan))) {
-          errors.push(`${rel}: in_progress task requires acceptanceCriteria and verificationPlan`);
-        }
-        if (record.status === 'done' && !needEvidence(record)) errors.push(`${rel}: done task requires verificationEvidence`);
-      }
-    }
     for (const entry of await readJsonDirRecords(check.dir)) {
       const rel = repoRelative(entry.file);
       let record;
@@ -169,9 +126,136 @@ async function lintStructuredRecords(errors, warnings, bag) {
       }
       bag[check.label].push(record);
       registerRecord(record, rel, 'json', check.label);
-      validateAgainstSchema(schema, record).forEach(message => errors.push(`${rel}: ${message}`));
+      pushLintFindings(errors, warnings, record, rel, validateAgainstSchema(schema, record));
+    }
+    for (const entry of await readDirRecords(check.dir)) {
+      const rel = repoRelative(entry.file);
+      const page = await readMarkdownPage(entry.file);
+      if (page.errors?.length) {
+        errors.push(`${rel}: invalid markdown (${page.errors.join('; ')})`);
+        continue;
+      }
+      const record = page.frontmatter || {};
+      const registration = registerRecord(record, rel, 'markdown', check.label);
+      if (registration === 'mirror') continue;
+      bag[check.label].push(record);
+      pushLintFindings(errors, warnings, record, rel, validateAgainstSchema(schema, record));
+    }
+
+    for (const record of bag[check.label]) {
+      const rel = record.paths?.self || record.path || record.id;
+      const severity = isLegacyRecord(record) ? 'warning' : 'error';
+
+      if (check.label === 'initiatives') {
+        await validateIdList(errors, warnings, rel, record.containerIds, 'container', 'warning');
+        await validateIdList(errors, warnings, rel, record.sprintIds, 'sprint', severity);
+        await validateIdList(errors, warnings, rel, record.issueIds, 'issue', severity);
+      }
+      if (check.label === 'issues') {
+        await validateIdList(errors, warnings, rel, record.containerIds, 'container', 'warning');
+        await validateIdList(errors, warnings, rel, record.initiativeIds, 'initiative', severity);
+        await validateIdList(errors, warnings, rel, record.sourceDiscoveryIds, 'discovery', severity);
+        await validateIdList(errors, warnings, rel, record.sourceCommentIds, 'comment', severity);
+        await validateIdList(errors, warnings, rel, record.dependencies?.blockedByIssueIds, 'issue', severity);
+        if (record.status === 'ready_for_agent' && (!needMeaningful(record.acceptanceCriteria) || !needMeaningful(record.verificationPlan) || !record.risk || record.risk === 'TBD')) {
+          pushInvariant(errors, warnings, record, `${rel}: ready_for_agent requires risk, acceptanceCriteria, and verificationPlan`);
+        }
+        if (['verified', 'closed'].includes(record.status) && !needEvidence(record)) {
+          pushInvariant(errors, warnings, record, `${rel}: ${record.status} issue requires verificationEvidence`);
+        }
+      }
+      if (check.label === 'comments') {
+        if (!record.target || !(await entityRefExists(record.target))) pushInvariant(errors, warnings, record, `${rel}: comment target missing`);
+        if (record.containerId) await validateIdList(errors, warnings, rel, [record.containerId], 'container', 'warning');
+        await validateIdList(errors, warnings, rel, record.relatedDiscoveryIds, 'discovery', severity);
+        await validateIdList(errors, warnings, rel, record.relatedIssueIds, 'issue', severity);
+      }
+      if (check.label === 'sprints') {
+        await validateIdList(errors, warnings, rel, record.initiativeIds, 'initiative', severity);
+        await validateIdList(errors, warnings, rel, record.containerIds, 'container', 'warning');
+        await validateIdList(errors, warnings, rel, record.issueIds, 'issue', severity);
+        await validateIdList(errors, warnings, rel, record.phaseIds, 'phase', 'warning');
+        await validateIdList(errors, warnings, rel, record.taskIds, 'task', 'warning');
+        if (record.status === 'completed' && !needMeaningful(record.successGates)) pushInvariant(errors, warnings, record, `${rel}: completed sprint requires successGates`);
+      }
+      if (check.label === 'phases') {
+        await validateIdList(errors, warnings, rel, [record.sprintId], 'sprint', severity);
+        await validateIdList(errors, warnings, rel, record.issueIds, 'issue', severity);
+        await validateIdList(errors, warnings, rel, record.taskIds, 'task', 'warning');
+        if (record.status === 'completed' && !needMeaningful(record.successGates)) pushInvariant(errors, warnings, record, `${rel}: completed phase requires successGates`);
+      }
+      if (check.label === 'tasks') {
+        await validateIdList(errors, warnings, rel, [record.sprintId], 'sprint', severity);
+        if (record.phaseId) await validateIdList(errors, warnings, rel, [record.phaseId], 'phase', severity);
+        await validateIdList(errors, warnings, rel, record.issueIds, 'issue', severity);
+        await validateIdList(errors, warnings, rel, record.containerIds, 'container', 'warning');
+        if (record.status === 'in_progress' && (!needMeaningful(record.acceptanceCriteria) || !needMeaningful(record.verificationPlan))) {
+          pushInvariant(errors, warnings, record, `${rel}: in_progress task requires acceptanceCriteria and verificationPlan`);
+        }
+        if (record.status === 'done' && !needEvidence(record)) pushInvariant(errors, warnings, record, `${rel}: done task requires verificationEvidence`);
+      }
     }
   }
+}
+
+function isLegacyRecord(record) {
+  return Boolean(record?.paths?.legacySelf);
+}
+
+function pushLintFindings(errors, warnings, record, rel, findings) {
+  const target = isLegacyRecord(record) ? warnings : errors;
+  for (const message of findings) target.push(`${rel}: ${message}`);
+}
+
+function pushInvariant(errors, warnings, record, message) {
+  if (isLegacyRecord(record)) warnings.push(message);
+  else errors.push(message);
+}
+
+function normalizeRawItemForLint(item) {
+  const allowedRefKinds = new Set(['container', 'comment', 'discovery', 'issue', 'sprint', 'phase', 'task', 'wiki_page', 'relationship', 'decision']);
+  const {
+    importedAt,
+    githubNumber,
+    ...normalized
+  } = item || {};
+
+  if (!Array.isArray(normalized.reconciledTo)) {
+    normalized.reconciledTo = [];
+    return normalizeLegacySourceType(normalized);
+  }
+
+  normalized.reconciledTo = normalized.reconciledTo.filter(ref => (
+    ref
+    && typeof ref === 'object'
+    && typeof ref.id === 'string'
+    && allowedRefKinds.has(ref.kind)
+  ));
+  return normalizeLegacySourceType(normalized);
+}
+
+function isLegacyRawItem(item) {
+  if (!item || typeof item !== 'object') return false;
+  if ('importedAt' in item || 'githubNumber' in item) return true;
+  if (!Array.isArray(item.reconciledTo)) return true;
+  if (Array.isArray(item.tags) && item.tags.includes('legacy')) return true;
+  if (item.sourceType === 'github_comment' || item.sourceType === 'github_export' || item.sourceType === 'github_issue') return true;
+  return false;
+}
+
+function normalizeLegacySourceType(item) {
+  if (item.sourceType === 'github_issue') return { ...item, sourceType: 'github_export' };
+  return item;
+}
+
+function isMarkdownMirrorForJson(markdownRecord, markdownRel, jsonRecord) {
+  if (!markdownRecord || !jsonRecord) return false;
+  const markdownPath = markdownRecord.paths?.self || markdownRel;
+  const expected = jsonRecord.paths?.markdown;
+  if (!expected) return false;
+  const normalizedMarkdownPath = String(markdownPath || '').replace(/^memory\//, '');
+  const normalizedExpected = String(expected || '').replace(/^memory\//, '');
+  return normalizedMarkdownPath === normalizedExpected;
 }
 
 function lintCrossRecordInvariants(errors, warnings, bag) {
