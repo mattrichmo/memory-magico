@@ -5,6 +5,7 @@ import fs from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
+import { Readable } from 'node:stream';
 import { detectBinaryType } from '../src/core/binary-detect.mjs';
 import { readJsonl } from '../src/core/json.mjs';
 import { readMarkdownPage, writeMarkdownPage } from '../src/core/frontmatter.mjs';
@@ -12,6 +13,7 @@ import { safeParseJson } from '../src/core/json-safe.mjs';
 import { resolveMemoryPath } from '../src/core/safe-path.mjs';
 import { memoryRoot } from '../src/core/paths.mjs';
 import { getCommand, listCommands } from '../src/core/command-registry.mjs';
+import { getSubcommandContract, listSubcommandContracts, resolveSubcommandContract, toolsForRoleTags } from '../src/core/subcommand-registry.mjs';
 import { COMMAND_HANDLERS } from '../src/core/command-handlers.mjs';
 import { indexStatus, rebuildIndex } from '../src/core/retrieval.mjs';
 import { makeId } from '../src/core/ids.mjs';
@@ -35,6 +37,12 @@ function captureJsonResponse() {
     },
   };
   return response;
+}
+
+function jsonRequest(body) {
+  const req = Readable.from([JSON.stringify(body)]);
+  req.method = 'POST';
+  return req;
 }
 
 test('registry exposes commands and aliases', () => {
@@ -63,6 +71,52 @@ test('every registered command has a handler and useful help metadata', () => {
   assert.match(getCommand('issue').description, /Creates/);
   assert.match(getCommand('sprint').description, /composes/);
   assert.match(getCommand('task').description, /completes/);
+});
+
+test('subcommand contracts cover core workflow and lock semantics', () => {
+  const contracts = listSubcommandContracts();
+  assert.ok(contracts.length > 70, 'subcommand registry unexpectedly small');
+
+  for (const id of ['issue.create', 'issue.verify', 'task.create', 'task.complete', 'sprint.compose', 'raw.promote', 'wiki.create']) {
+    const [command, action] = id.split('.');
+    const contract = getSubcommandContract(command, action);
+    assert.ok(contract, `${id} contract missing`);
+    assert.equal(contract.id, id);
+    assert.ok(contract.usage.startsWith(`mm ${command}`), `${id} usage must be a concrete mm command`);
+    assert.ok(contract.roleTags.length > 0, `${id} must declare role tags`);
+  }
+
+  assert.equal(resolveSubcommandContract('task', ['task', 'list']).lockScope, null);
+  assert.equal(resolveSubcommandContract('task', ['task', 'update']).lockScope, 'repo-write');
+  assert.equal(resolveSubcommandContract('doctor', ['doctor']).lockScope, null);
+  assert.equal(resolveSubcommandContract('doctor', ['doctor', '--fix']).lockScope, 'repo-write');
+  assert.ok(toolsForRoleTags(['work.issue.create']).includes('mm issue create'));
+  assert.ok(toolsForRoleTags(['work.sprint.compose']).includes('mm sprint compose'));
+});
+
+test('mm commands exposes subcommand contracts', () => {
+  const result = spawnSync('node', ['./bin/mm.mjs', 'commands', '--json', '--subcommands'], {
+    cwd: repoRoot,
+    encoding: 'utf8',
+  });
+  assert.equal(result.status, 0, result.stderr);
+  const payload = JSON.parse(result.stdout);
+  assert.equal(payload.ok, true);
+  assert.ok(payload.subcommands.some(contract => contract.id === 'sprint.compose'));
+  const issue = payload.commands.find(command => command.name === 'issue');
+  assert.ok(issue.subcommands.some(contract => contract.id === 'issue.create'));
+});
+
+test('mm help supports subcommand contract pages', () => {
+  const result = spawnSync('node', ['./bin/mm.mjs', 'help', 'issue', 'create'], {
+    cwd: repoRoot,
+    encoding: 'utf8',
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /^issue create\n/);
+  assert.match(result.stdout, /Domain: work/);
+  assert.match(result.stdout, /Role tags: work\.issue\.create/);
+  assert.match(result.stdout, /Usage: mm issue create/);
 });
 
 test('mm help works for every registered command', () => {
@@ -209,6 +263,39 @@ test('dashboard api and traversal protections work', async () => {
   assert.ok(dashboard.summary);
   assert.ok(dashboard.focus);
   assert.ok(dashboard.indices);
+  assert.ok(Array.isArray(dashboard.routes));
+  assert.ok(dashboard.routes.some(route => route.id === 'bugs' && route.viewOf === 'issues'));
+  assert.ok(dashboard.summary.issues.byType);
+
+  const routesRes = captureJsonResponse();
+  await handleApi('/api/dashboard/routes', new URLSearchParams(), routesRes);
+  const routesPayload = JSON.parse(routesRes.body);
+  assert.equal(routesRes.statusCode, 200);
+  assert.equal(routesPayload.ok, true);
+  assert.ok(routesPayload.routes.some(route => route.endpoint === '/api/work/issues'));
+
+  const tasksRes = captureJsonResponse();
+  await handleApi('/api/work/tasks', new URLSearchParams(), tasksRes);
+  const tasksPayload = JSON.parse(tasksRes.body);
+  assert.equal(tasksRes.statusCode, 200);
+  assert.equal(tasksPayload.ok, true);
+  assert.ok(Array.isArray(tasksPayload.items));
+
+  const systemRes = captureJsonResponse();
+  await handleApi('/api/system/status', new URLSearchParams(), systemRes);
+  const systemPayload = JSON.parse(systemRes.body);
+  assert.equal(systemRes.statusCode, 200);
+  assert.equal(systemPayload.ok, true);
+  assert.ok(systemPayload.summary);
+
+  const dryRunRes = captureJsonResponse();
+  await handleApi('/api/command/dry-run', new URLSearchParams(), dryRunRes, jsonRequest({ args: ['issue', 'create', 'Dashboard dry-run issue', '--json'] }));
+  const dryRunPayload = JSON.parse(dryRunRes.body);
+  assert.equal(dryRunRes.statusCode, 200);
+  assert.equal(dryRunPayload.ok, true);
+  assert.equal(dryRunPayload.mode, 'dry-run');
+  assert.equal(dryRunPayload.contract.id, 'issue.create');
+  assert.equal(dryRunPayload.wouldExecute, false);
 
   const entityRes = captureJsonResponse();
   await handleApi('/api/entity/task/task_mqiarfrs_uggdg9', new URLSearchParams(), entityRes);
@@ -324,6 +411,8 @@ test('mm commands --json is parseable', () => {
   assert.equal(result.status, 0, result.stderr);
   const payload = JSON.parse(result.stdout);
   assert.equal(payload.ok, true);
+  assert.equal(payload.command, 'commands.list');
+  assert.ok(Array.isArray(payload.warnings));
   assert.ok(Array.isArray(payload.commands));
   assert.ok(payload.commands.some(command => command.name === 'read'));
 });
@@ -337,6 +426,27 @@ test('mm read --json is parseable', () => {
   const payload = JSON.parse(result.stdout);
   assert.equal(payload.ok, true);
   assert.equal(payload.path.endsWith('memory/README.md'), true);
+});
+
+test('mm read distinguishes repo and memory paths explicitly', () => {
+  const repoRead = spawnSync('node', ['./bin/mm.mjs', 'read', 'README.md', '--lines', '1', '--json'], {
+    cwd: repoRoot,
+    encoding: 'utf8',
+  });
+  assert.equal(repoRead.status, 0, repoRead.stderr);
+  const repoPayload = JSON.parse(repoRead.stdout);
+  assert.equal(repoPayload.ok, true);
+  assert.equal(repoPayload.path.endsWith('/README.md'), true);
+  assert.equal(repoPayload.path.endsWith('/memory/README.md'), false);
+
+  const memoryRead = spawnSync('node', ['./bin/mm.mjs', 'read', '--memory', 'README.md', '--lines', '1', '--json'], {
+    cwd: repoRoot,
+    encoding: 'utf8',
+  });
+  assert.equal(memoryRead.status, 0, memoryRead.stderr);
+  const memoryPayload = JSON.parse(memoryRead.stdout);
+  assert.equal(memoryPayload.ok, true);
+  assert.equal(memoryPayload.path.endsWith('/memory/README.md'), true);
 });
 
 test('mm doctor --json is parseable', () => {
@@ -387,6 +497,82 @@ test('mm raw list --json is parseable', () => {
   const payload = JSON.parse(result.stdout);
   assert.equal(payload.ok, true);
   assert.ok(Array.isArray(payload.items));
+});
+
+test('mm raw promote reconciles raw intake to an existing issue', async () => {
+  const suffix = makeId('promote').replace(/^promote_/, '');
+  const rawId = `raw_promote_${suffix}`;
+  const issueId = `issue_promote_${suffix}`;
+  const rawJsonl = path.join(repoRoot, 'memory', 'inbox', 'raw-items.jsonl');
+  const issueIndex = path.join(repoRoot, 'memory', 'work', 'issues', 'index.jsonl');
+  const rawFile = path.join(repoRoot, 'memory', 'inbox', 'raw', `${rawId}.md`);
+  const processedFile = path.join(repoRoot, 'memory', 'inbox', 'processed', `${rawId}.md`);
+  const issueFile = path.join(repoRoot, 'memory', 'work', 'issues', `${issueId}.md`);
+  const rawSnapshot = await fs.readFile(rawJsonl, 'utf8').catch(() => '');
+  const issueSnapshot = await fs.readFile(issueIndex, 'utf8').catch(() => '');
+
+  try {
+    const issueCreate = spawnSync('node', [
+      './bin/mm.mjs',
+      'issue',
+      'create',
+      'Temporary promotion issue',
+      '--id',
+      issueId,
+      '--issue-type',
+      'bug',
+      '--json',
+    ], {
+      cwd: repoRoot,
+      encoding: 'utf8',
+    });
+    assert.equal(issueCreate.status, 0, issueCreate.stderr);
+
+    await fs.mkdir(path.dirname(rawFile), { recursive: true });
+    await fs.writeFile(rawFile, '# Raw Item\n\nTemporary raw payload.\n', 'utf8');
+    const rawItem = {
+      id: rawId,
+      kind: 'raw_item',
+      title: 'Temporary raw promotion',
+      summary: 'Temporary raw promotion',
+      sourceType: 'test',
+      status: 'unreconciled',
+      path: `memory/inbox/raw/${rawId}.md`,
+      tags: [],
+      reconciledTo: [],
+      createdAt: '2026-06-18T00:00:00.000Z',
+      updatedAt: '2026-06-18T00:00:00.000Z',
+    };
+    await fs.appendFile(rawJsonl, `${JSON.stringify(rawItem)}\n`, 'utf8');
+
+    const promoted = spawnSync('node', [
+      './bin/mm.mjs',
+      'raw',
+      'promote',
+      rawId,
+      '--to',
+      'issue',
+      '--id',
+      issueId,
+      '--json',
+    ], {
+      cwd: repoRoot,
+      encoding: 'utf8',
+    });
+    assert.equal(promoted.status, 0, promoted.stderr);
+    const payload = JSON.parse(promoted.stdout);
+    assert.equal(payload.ok, true);
+    assert.equal(payload.item.status, 'processed');
+    assert.deepEqual(payload.item.reconciledTo, [{ kind: 'issue', id: issueId }]);
+    await assert.rejects(() => fs.stat(rawFile));
+    assert.ok((await fs.stat(processedFile)).isFile());
+  } finally {
+    await fs.writeFile(rawJsonl, rawSnapshot, 'utf8');
+    await fs.writeFile(issueIndex, issueSnapshot, 'utf8');
+    await fs.rm(rawFile, { force: true });
+    await fs.rm(processedFile, { force: true });
+    await fs.rm(issueFile, { force: true });
+  }
 });
 
 test('mm raw add --help is read-only usage output', async () => {
@@ -955,6 +1141,8 @@ test('core work commands emit JSON envelopes', () => {
     assert.equal(result.status, 0, `${testCase.args.join(' ')}\n${result.stderr}`);
     const payload = JSON.parse(result.stdout);
     assert.equal(payload.ok, true, `${testCase.args.join(' ')}\n${result.stdout}`);
+    assert.equal(typeof payload.command, 'string', `${testCase.args.join(' ')} missing command envelope`);
+    assert.ok(Array.isArray(payload.warnings), `${testCase.args.join(' ')} missing warnings envelope`);
     testCase.expect(payload);
   }
 });

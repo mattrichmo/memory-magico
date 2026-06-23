@@ -13,12 +13,13 @@ import { maybeSpoolJsonResult } from '../core/result-spool.mjs';
 import { writeJsonOutput } from '../core/renderers.mjs';
 import { addRawImage } from './image.mjs';
 import { detectPromptMarkers } from '../core/prompt-markers.mjs';
+import { parseArgs } from '../core/cli.mjs';
 
 const rawFile = path.join(memoryRoot, 'inbox', 'raw-items.jsonl');
 const rawDir = path.join(memoryRoot, 'inbox', 'raw');
 
 function usage() {
-  console.log('Usage: mm raw <add|add-image|list|list-all|show|process|reject|archive|cleanup> ...');
+  console.log('Usage: mm raw <add|add-image|list|list-all|show|process|promote|reject|archive|cleanup> ...');
 }
 
 function addUsage() {
@@ -302,6 +303,29 @@ export async function run(argv) {
       console.log('');
       console.log(`[truncated bytes=${preview.truncatedByBytes ? 'yes' : 'no'} lines=${preview.truncatedByLines ? 'yes' : 'no'}]`);
     }
+    return;
+  }
+
+  if (sub === 'promote') {
+    const id = argv[2];
+    const opts = parseArgs(argv, 3);
+    if (!id || !opts.to || !opts.id) {
+      console.log('Usage: mm raw promote <id> --to <kind> --id <target-id> [--path <target-path>] [--note "..."] [--json]');
+      return;
+    }
+    let normalizedTargetPath = null;
+    if (opts.path) {
+      const resolvedTargetPath = await resolveRepoPath(repoRoot, opts.path, 'repo-read');
+      normalizedTargetPath = path.relative(repoRoot, resolvedTargetPath).split(path.sep).join('/');
+    }
+    const note = opts.note || '';
+    const updated = await reconcileRawItem(id, 'processed', [makeTargetRef(opts.to, opts.id, normalizedTargetPath)], note, { json });
+    if (json) {
+      writeJsonOutput({ ok: true, item: updated });
+      return;
+    }
+    console.log('');
+    console.log('Promoted raw item using canonical raw promote surface.');
     return;
   }
 

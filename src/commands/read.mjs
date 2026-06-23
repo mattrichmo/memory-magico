@@ -6,10 +6,48 @@ import { readTextRange } from '../core/read-range.mjs';
 import { detectBinaryType } from '../core/binary-detect.mjs';
 import { writeJsonOutput } from '../core/renderers.mjs';
 
-function pickPath(target) {
+async function pathExists(filePath) {
+  try {
+    await fs.access(filePath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function optionValue(argv, flag) {
+  const index = argv.indexOf(flag);
+  return index === -1 ? null : argv[index + 1] || null;
+}
+
+function firstPathArg(argv) {
+  const skipValueAfter = new Set(['--offset', '--lines', '--max-bytes', '--memory', '--repo']);
+  for (let index = 1; index < argv.length; index += 1) {
+    const arg = argv[index];
+    if (skipValueAfter.has(argv[index - 1])) continue;
+    if (skipValueAfter.has(arg)) {
+      index += 1;
+      continue;
+    }
+    if (String(arg).startsWith('-')) continue;
+    return arg;
+  }
+  return null;
+}
+
+async function pickPath(argv) {
+  const memoryTarget = optionValue(argv, '--memory');
+  if (memoryTarget) return resolveMemoryPath(memoryRoot, memoryTarget, 'memory-read');
+
+  const repoTarget = optionValue(argv, '--repo');
+  if (repoTarget) return resolveRepoPath(repoRoot, repoTarget, 'repo-read');
+
+  const target = firstPathArg(argv);
   if (!target) return null;
   if (target.startsWith('memory/')) return resolveRepoPath(repoRoot, target, 'repo-read');
   if (target.startsWith('./memory/') || target.startsWith('../memory/')) return resolveRepoPath(repoRoot, target, 'repo-read');
+  const repoPath = await resolveRepoPath(repoRoot, target, 'repo-read');
+  if (await pathExists(repoPath)) return repoPath;
   return resolveMemoryPath(memoryRoot, target, 'memory-read');
 }
 
@@ -26,9 +64,9 @@ async function readProbeBytes(filePath, maxBytes = 4096) {
 }
 
 export async function run(argv = []) {
-  const target = argv[1];
-  if (!target) {
-    console.log('Usage: mm read <path> [--offset N] [--lines N] [--max-bytes N] [--json] [--binary-info]');
+  const fullPath = await pickPath(argv);
+  if (!fullPath) {
+    console.log('Usage: mm read [--repo|--memory] <path> [--offset N] [--lines N] [--max-bytes N] [--json] [--binary-info]');
     console.log('Note: without --offset the preview is byte-bounded; with --offset the reader streams the requested line window.');
     return;
   }
@@ -42,7 +80,6 @@ export async function run(argv = []) {
   const json = argv.includes('--json');
   const binaryInfo = argv.includes('--binary-info');
 
-  const fullPath = await pickPath(target);
   const buffer = await readProbeBytes(fullPath);
   const mediaType = detectBinaryType(buffer);
 

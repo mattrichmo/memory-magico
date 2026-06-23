@@ -31,7 +31,40 @@ export function renderCommandHelp(command) {
   return lines.join('\n');
 }
 
+export function renderSubcommandTable(contracts) {
+  return contracts.map(contract => {
+    const mode = contract.readOnly ? 'read' : 'write';
+    return `${contract.command} ${contract.action} [${contract.domain}/${mode}] - ${contract.summary}`;
+  }).join('\n');
+}
+
+export function renderSubcommandHelp(command, contract) {
+  const lines = [];
+  lines.push(`${command.name} ${contract.action}`);
+  lines.push(contract.summary);
+  if (command.description) {
+    lines.push('');
+    lines.push(command.description);
+  }
+  lines.push('');
+  lines.push(`Domain: ${contract.domain}`);
+  lines.push(`Mode: ${contract.readOnly ? 'read-only' : 'write'}`);
+  if (contract.lockScope) lines.push(`Lock: ${contract.lockScope}`);
+  if (contract.roleTags?.length) lines.push(`Role tags: ${contract.roleTags.join(', ')}`);
+  if (contract.lifecycleEffects?.length) lines.push(`Lifecycle effects: ${contract.lifecycleEffects.join(', ')}`);
+  if (contract.requiredEvidence?.length) lines.push(`Required evidence: ${contract.requiredEvidence.join(', ')}`);
+  if (contract.usage) {
+    lines.push('');
+    lines.push(`Usage: ${contract.usage}`);
+  }
+  if (contract.examples?.length) {
+    lines.push('');
+    lines.push('Examples:');
+    for (const example of contract.examples) lines.push(`  ${example}`);
+  }
+  return lines.join('\n');
+}
+
 export function writeJsonOutput(value) {
   process.stdout.write(`${stringifyJsonStable(value)}\n`);
 }
-

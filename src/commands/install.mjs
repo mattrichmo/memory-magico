@@ -25,6 +25,7 @@ import { withLock } from '../core/lock.mjs';
 import { writeProjectConfig } from '../core/project-config.mjs';
 import { ensureWorkspaceStructure } from '../core/workspace.mjs';
 import { validateRoleContract } from '../core/role-contracts.mjs';
+import { toolsForRoleTags } from '../core/subcommand-registry.mjs';
 
 function rolesDirFor(destRoot, sourceMemoryRoot) {
   return path.join(sourceMemoryRoot ?? path.join(destRoot ?? workspaceRoot, 'memory'), 'agents', 'roles');
@@ -149,6 +150,9 @@ async function loadRoles(destRoot, sourceMemoryRoot) {
     }
 
     const fm = parseFrontmatter(content);
+    const allowedCapabilities = Array.isArray(fm.allowed_capabilities) ? fm.allowed_capabilities : [];
+    const expandedTools = toolsForRoleTags(allowedCapabilities);
+    const allowedTools = [...new Set([...(Array.isArray(fm.allowed_tools) ? fm.allowed_tools : []), ...expandedTools])];
     roles.push({
       slug: entry.name,
       agentMdPath: `agents/roles/${entry.name}/AGENT.md`,
@@ -156,7 +160,8 @@ async function loadRoles(destRoot, sourceMemoryRoot) {
       title: fm.title || entry.name,
       description: fm.description || '',
       skillGroups: Array.isArray(fm.skill_groups) ? fm.skill_groups : [],
-      allowedTools: Array.isArray(fm.allowed_tools) ? fm.allowed_tools : [],
+      allowedCapabilities,
+      allowedTools,
       forbiddenTools: Array.isArray(fm.forbidden_tools) ? fm.forbidden_tools : [],
     });
 
@@ -247,6 +252,9 @@ function genSubagent(role) {
     .join('\n');
 
   const mmTools = role.allowedTools.filter(t => t.startsWith('mm '));
+  const capabilityBlock = role.allowedCapabilities?.length
+    ? `\n## Allowed capability tags\n\n${role.allowedCapabilities.map(tag => `- ${tag}`).join('\n')}\n`
+    : '';
   const forbidden = role.forbiddenTools.length
     ? `\n## Forbidden tools\n\nNever use: ${role.forbiddenTools.join(', ')}\n`
     : '';
@@ -294,6 +302,7 @@ ${skillReadmes}
 ## Allowed mm tools
 
 ${mmTools.map(t => `- ${t}`).join('\n')}
+${capabilityBlock}
 ${forbidden}
 ${safetyBlock}
 ## Completion check
@@ -337,6 +346,9 @@ function genCodexSkill(role) {
     ? `\n**Forbidden:** ${role.forbiddenTools.join(', ')}\n`
     : '';
   const allowedMmTools = role.allowedTools.filter(t => t.startsWith('mm '));
+  const capabilityBlock = role.allowedCapabilities?.length
+    ? `\n## Allowed Capability Tags\n\n${role.allowedCapabilities.map(tag => `- \`${tag}\``).join('\n')}\n`
+    : '';
   const canRawAdd = role.allowedTools.includes('mm raw add');
   const completionChecks = [
     'mm info',
@@ -375,6 +387,7 @@ ${role.body}
 ## Allowed mm Tools
 
 ${allowedMmTools.map(tool => `- \`${tool}\``).join('\n')}
+${capabilityBlock}
 ${forbidden}
 ${safetyBlock}
 ## Operating Rules

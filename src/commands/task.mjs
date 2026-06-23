@@ -83,10 +83,6 @@ export async function run(argv) {
     if (task.phaseId) await assertEntityExists(task.phaseId, 'phase', 'phase');
     await assertEntityListExists(task.issueIds, 'issue', 'issue');
     await assertEntityListExists(task.containerIds, 'container', 'container');
-    await assertEntityExists(task.sprintId, 'sprint', 'sprint');
-    if (task.phaseId) await assertEntityExists(task.phaseId, 'phase', 'phase');
-    await assertEntityListExists(task.issueIds, 'issue', 'issue');
-    await assertEntityListExists(task.containerIds, 'container', 'container');
     await persistTask(task);
     if (json) {
       writeJsonOutput({ ok: true, item: task });

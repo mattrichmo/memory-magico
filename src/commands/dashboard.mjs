@@ -12,6 +12,10 @@ import { findEntityRecord } from '../core/entities.mjs';
 import { resolveEntity, search } from '../core/retrieval.mjs';
 import { readGitDiff, readGitLog, readGitStatus as readGitStatusCore } from '../core/git.mjs';
 import { withLock } from '../core/lock.mjs';
+import { readClaims } from '../core/claims.mjs';
+import { listDashboardRoutes } from '../core/dashboard-contracts.mjs';
+import { getCommand } from '../core/command-registry.mjs';
+import { resolveSubcommandContract } from '../core/subcommand-registry.mjs';
 
 const dashboardRoot = path.join(toolRoot, 'dashboard');
 const defaultPort = 4317;
@@ -28,6 +32,12 @@ const mimeTypes = {
 
 const roots = {
   issues: path.join(memoryRoot, 'work', 'issues'),
+  sprints: path.join(memoryRoot, 'work', 'sprints'),
+  phases: path.join(memoryRoot, 'work', 'phases'),
+  tasks: path.join(memoryRoot, 'work', 'tasks'),
+  containers: path.join(memoryRoot, 'work', 'containers'),
+  initiatives: path.join(memoryRoot, 'work', 'initiatives'),
+  comments: path.join(memoryRoot, 'work', 'comments'),
   raw: path.join(memoryRoot, 'inbox', 'raw-items.jsonl'),
   discoveries: path.join(memoryRoot, 'work', 'discoveries'),
   wiki: path.join(memoryRoot, 'wiki'),
@@ -71,6 +81,84 @@ function sendJson(res, statusCode, payload) {
 function sendText(res, statusCode, body) {
   res.writeHead(statusCode, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' });
   res.end(body);
+}
+
+async function readRequestJson(req) {
+  if (!req) return {};
+  return new Promise((resolve, reject) => {
+    let body = '';
+    req.setEncoding?.('utf8');
+    req.on('data', chunk => { body += chunk; });
+    req.on('end', () => {
+      if (!body.trim()) {
+        resolve({});
+        return;
+      }
+      try {
+        resolve(JSON.parse(body));
+      } catch (error) {
+        reject(Object.assign(new Error('Invalid JSON request body.'), { code: 'INVALID_JSON' }));
+      }
+    });
+    req.on('error', reject);
+  });
+}
+
+function normalizeCommandArgs(payload) {
+  const args = Array.isArray(payload?.args) ? payload.args : Array.isArray(payload?.argv) ? payload.argv : [];
+  return args.map(value => String(value));
+}
+
+function commandPreview(args) {
+  return `mm ${args.map(arg => /\s/.test(arg) ? JSON.stringify(arg) : arg).join(' ')}`;
+}
+
+function validateCommandPayload(payload) {
+  const args = normalizeCommandArgs(payload);
+  const commandName = args[0] || '';
+  const command = getCommand(commandName);
+  if (!args.length || !command) {
+    return {
+      ok: false,
+      statusCode: 400,
+      payload: {
+        ok: false,
+        error: { code: 'UNKNOWN_COMMAND', message: `Unknown command: ${commandName || '(missing)'}`, hint: 'Pass args as ["issue","create",...].' },
+      },
+    };
+  }
+  const contract = resolveSubcommandContract(command.name, args);
+  return {
+    ok: true,
+    args,
+    command,
+    contract,
+    preview: commandPreview(args),
+  };
+}
+
+function runCliCommand(args) {
+  return new Promise(resolve => {
+    const child = spawn(process.execPath, [path.join(toolRoot, 'bin', 'mm.mjs'), ...args], {
+      cwd: toolRoot,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    let stdout = '';
+    let stderr = '';
+    child.stdout.setEncoding('utf8');
+    child.stderr.setEncoding('utf8');
+    child.stdout.on('data', chunk => { stdout += chunk; });
+    child.stderr.on('data', chunk => { stderr += chunk; });
+    child.on('close', status => {
+      let parsedJson = null;
+      try {
+        parsedJson = JSON.parse(stdout);
+      } catch {
+        parsedJson = null;
+      }
+      resolve({ status, stdout, stderr, parsedJson });
+    });
+  });
 }
 
 function normalizePathname(urlPath) {
@@ -121,7 +209,12 @@ async function loadWikiPage(id) {
   return pages.find(page => page.id === id || page.path === id || page.slug === id) || null;
 }
 
-export async function handleApi(pathname, searchParams, res) {
+export async function handleApi(pathname, searchParams, res, req = null) {
+  if (pathname === '/api/dashboard/routes') {
+    sendJson(res, 200, { ok: true, routes: listDashboardRoutes() });
+    return;
+  }
+
   if (pathname === '/api/dashboard') {
     const payload = await buildDashboardData();
     sendJson(res, 200, payload);
@@ -142,7 +235,54 @@ export async function handleApi(pathname, searchParams, res) {
     return;
   }
 
+  if (pathname === '/api/work/issues') {
+    const issueType = searchParams.get('issueType');
+    const items = await listRecords(roots.issues);
+    sendJson(res, 200, { ok: true, items: issueType ? items.filter(item => item.issueType === issueType || item.type === issueType) : items });
+    return;
+  }
+
+  if (pathname === '/api/work/sprints') {
+    sendJson(res, 200, { ok: true, items: await listRecords(roots.sprints) });
+    return;
+  }
+
+  if (pathname === '/api/work/phases') {
+    sendJson(res, 200, { ok: true, items: await listRecords(roots.phases) });
+    return;
+  }
+
+  if (pathname === '/api/work/tasks') {
+    sendJson(res, 200, { ok: true, items: await listRecords(roots.tasks) });
+    return;
+  }
+
+  if (pathname === '/api/work/discoveries') {
+    sendJson(res, 200, { ok: true, items: await listRecords(roots.discoveries) });
+    return;
+  }
+
+  if (pathname === '/api/work/containers') {
+    sendJson(res, 200, { ok: true, items: await listRecords(roots.containers) });
+    return;
+  }
+
+  if (pathname === '/api/work/initiatives') {
+    sendJson(res, 200, { ok: true, items: await listRecords(roots.initiatives) });
+    return;
+  }
+
+  if (pathname === '/api/work/comments' || pathname === '/api/knowledge/comments') {
+    sendJson(res, 200, { ok: true, items: await listRecords(roots.comments) });
+    return;
+  }
+
   if (pathname === '/api/raw') {
+    sendJson(res, 200, { ok: true, items: await readLatestIndex(roots.raw) });
+    return;
+  }
+
+  if (pathname === '/api/intake/raw') {
     sendJson(res, 200, { ok: true, items: await readLatestIndex(roots.raw) });
     return;
   }
@@ -158,6 +298,17 @@ export async function handleApi(pathname, searchParams, res) {
     return;
   }
 
+  if (pathname === '/api/knowledge/wiki') {
+    const pages = await scanMarkdownPages([roots.wiki]);
+    sendJson(res, 200, { ok: true, pages: pageIndexRows(pages) });
+    return;
+  }
+
+  if (pathname === '/api/knowledge/claims') {
+    sendJson(res, 200, { ok: true, items: await readClaims() });
+    return;
+  }
+
   if (pathname === '/api/graph') {
     const edges = await readLatestIndex(roots.graph);
     const node = searchParams.get('node');
@@ -169,6 +320,61 @@ export async function handleApi(pathname, searchParams, res) {
   if (pathname === '/api/git/status') {
     const status = await readGitStatus();
     sendJson(res, 200, { ok: true, ...status });
+    return;
+  }
+
+  if (pathname === '/api/system/status') {
+    const [dashboard, git] = await Promise.all([buildDashboardData(), readGitStatus()]);
+    sendJson(res, 200, { ok: true, generatedAt: dashboard.generatedAt, summary: dashboard.summary, indices: dashboard.indices, git });
+    return;
+  }
+
+  if (pathname === '/api/command/dry-run' || pathname === '/api/command/execute') {
+    const method = req?.method || 'POST';
+    if (method !== 'POST') {
+      sendJson(res, 405, { ok: false, error: { code: 'METHOD_NOT_ALLOWED', message: 'Command endpoints require POST.' } });
+      return;
+    }
+    const payload = await readRequestJson(req);
+    const validation = validateCommandPayload(payload);
+    if (!validation.ok) {
+      sendJson(res, validation.statusCode, validation.payload);
+      return;
+    }
+    const commandContract = validation.contract ? {
+      id: validation.contract.id,
+      domain: validation.contract.domain,
+      readOnly: validation.contract.readOnly,
+      lockScope: validation.contract.lockScope,
+      roleTags: validation.contract.roleTags,
+      lifecycleEffects: validation.contract.lifecycleEffects,
+      requiredEvidence: validation.contract.requiredEvidence,
+    } : null;
+    if (pathname === '/api/command/dry-run') {
+      sendJson(res, 200, {
+        ok: true,
+        mode: 'dry-run',
+        command: validation.preview,
+        args: validation.args,
+        contract: commandContract,
+        wouldExecute: false,
+      });
+      return;
+    }
+    const result = await runCliCommand(validation.args);
+    sendJson(res, result.status === 0 ? 200 : 400, {
+      ok: result.status === 0,
+      mode: 'execute',
+      command: validation.preview,
+      args: validation.args,
+      contract: commandContract,
+      result: {
+        status: result.status,
+        stdout: result.stdout,
+        stderr: result.stderr,
+        parsedJson: result.parsedJson,
+      },
+    });
     return;
   }
 
@@ -278,7 +484,7 @@ export async function run(argv) {
     }
     if (pathname.startsWith('/api/')) {
       try {
-        await handleApi(pathname, requestUrl.searchParams, res);
+        await handleApi(pathname, requestUrl.searchParams, res, req);
       } catch (error) {
         const statusCode = error?.code === 'PATH_OUTSIDE_MEMORY_ROOT' || error?.code === 'INVALID_ARGUMENT' ? 400 : 500;
         sendJson(res, statusCode, {

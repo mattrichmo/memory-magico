@@ -18,5 +18,21 @@
  * @property {string[]} examples
  */
 
-export {};
+/**
+ * @typedef {Object} SubcommandContract
+ * @property {string} id Stable command.action identifier.
+ * @property {string} command Top-level command name.
+ * @property {string} action Subcommand or routed action.
+ * @property {"intake"|"knowledge"|"work"|"graph"|"system"} domain Product domain.
+ * @property {string} summary Human-readable action summary.
+ * @property {string} usage Full CLI usage string.
+ * @property {boolean} readOnly Whether this action avoids mutation.
+ * @property {string|null} lockScope Lock name required before execution.
+ * @property {string[]} roleTags Capability tags consumed by generated agent roles.
+ * @property {boolean} dashboard Whether the action is eligible for dashboard surfacing.
+ * @property {string[]} lifecycleEffects Entity lifecycle effects caused by the action.
+ * @property {string[]} requiredEvidence Evidence fields required before terminal transitions.
+ * @property {string[]} examples Concrete CLI examples.
+ */
 
+export {};

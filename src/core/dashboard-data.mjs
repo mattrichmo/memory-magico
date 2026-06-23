@@ -3,6 +3,7 @@ import path from 'path';
 import { memoryRoot } from './paths.mjs';
 import { listRecords, readLatestIndex } from './records.mjs';
 import { loadIndex, searchStatus } from './retrieval.mjs';
+import { listDashboardRoutes } from './dashboard-contracts.mjs';
 
 const sprintRoot = path.join(memoryRoot, 'work', 'sprints');
 const phaseRoot = path.join(memoryRoot, 'work', 'phases');
@@ -333,6 +334,7 @@ export async function buildDashboardData() {
   const issueOpen = issues.filter(issue => !['closed', 'verified'].includes(issue.status));
   const issueBySeverity = countBy(issueOpen, 'severity');
   const issueByStatus = countBy(issues, 'status');
+  const issueByType = countBy(issues, 'issueType');
   const containerByStatus = countBy(containers, 'status');
 
   return {
@@ -341,7 +343,7 @@ export async function buildDashboardData() {
       sprints: { total: sprints.length, active: sprintCards.filter(card => card.status === 'active').length, planned: sprintCards.filter(card => card.status === 'planned').length, completed: sprintCards.filter(card => card.status === 'completed').length },
       phases: { total: phases.length, completed: phases.filter(item => item.status === 'completed').length, active: phases.filter(item => item.status === 'active').length },
       tasks: { total: tasks.length, done: tasks.filter(item => item.status === 'done').length, blocked: tasks.filter(item => item.status === 'blocked').length, inProgress: tasks.filter(item => item.status === 'in_progress').length },
-      issues: { total: issues.length, open: issueOpen.length, bySeverity: issueBySeverity, byStatus: issueByStatus },
+      issues: { total: issues.length, open: issueOpen.length, bySeverity: issueBySeverity, byStatus: issueByStatus, byType: issueByType },
       containers: { total: containers.length, byStatus: containerByStatus },
       discoveries: summarizeDiscoveries(discoveries),
       raw: summarizeRawItems(rawItems),
@@ -369,5 +371,6 @@ export async function buildDashboardData() {
       sprintSummaryCount: sprintSummaries.length,
       taskSummaryCount: taskSummaries.length,
     },
+    routes: listDashboardRoutes(),
   };
 }

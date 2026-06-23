@@ -52,7 +52,7 @@ export function installJsonStdoutGuard() {
   };
 }
 
-export async function withJsonStdoutGuard(fn) {
+export async function withJsonStdoutGuard(fn, { transform = null } = {}) {
   const restore = installJsonStdoutGuard();
   try {
     const result = await fn();
@@ -67,7 +67,12 @@ export async function withJsonStdoutGuard(fn) {
         details: { preview: trimmed.slice(0, 500) },
       });
     }
-    process.stdout.write(captured);
+    if (transform) {
+      const parsed = safeParseJson(trimmed);
+      process.stdout.write(`${JSON.stringify(transform(parsed), null, 2)}\n`);
+    } else {
+      process.stdout.write(captured);
+    }
     return result;
   } finally {
     restore();
