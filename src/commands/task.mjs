@@ -15,6 +15,7 @@ function toIndexRecord(item) {
   return {
     id: item.id,
     kind: 'task',
+    number: item.number,
     title: item.title,
     status: item.status,
     sprintId: item.sprintId,
@@ -29,17 +30,60 @@ function toIndexRecord(item) {
   };
 }
 
-function createTask(opts) {
+function parseOrdinal(value, label) {
+  if (value === true || value === false) {
+    throw new Error(`${label} must be a positive integer`);
+  }
+  const number = Number(value);
+  if (!Number.isInteger(number) || number < 1) {
+    throw new Error(`${label} must be a positive integer`);
+  }
+  return number;
+}
+
+function taskNumberScope(item) {
+  if (item.phaseId) return `phase:${item.phaseId}`;
+  if (item.sprintId) return `sprint:${item.sprintId}`;
+  return '__unscoped__';
+}
+
+async function nextTaskNumber({ sprintId, phaseId }) {
+  const scope = taskNumberScope({ sprintId, phaseId });
+  const items = await listRecordsWithIndexFallback(taskRoot, indexFile);
+  const numbers = items
+    .filter(item => taskNumberScope(item) === scope)
+    .map(item => Number(item.number))
+    .filter(number => Number.isInteger(number) && number > 0);
+  return numbers.length ? Math.max(...numbers) + 1 : 1;
+}
+
+function compareNumberedRecords(a, b) {
+  const aNum = Number(a.number || 0);
+  const bNum = Number(b.number || 0);
+  if (aNum && bNum && aNum !== bNum) return aNum - bNum;
+  if (aNum && !bNum) return -1;
+  if (!aNum && bNum) return 1;
+  const aTime = a.createdAt || a.updatedAt || '';
+  const bTime = b.createdAt || b.updatedAt || '';
+  if (aTime !== bTime) return aTime.localeCompare(bTime);
+  return String(a.id || '').localeCompare(String(b.id || ''));
+}
+
+async function createTask(opts) {
   const title = (opts.title || opts._.join(' ')).trim();
   if (!title || !opts['sprint-id']) {
-    console.log('Usage: mm task create <title> --sprint-id <sprint_id> [--phase-id <phase_id>] [--issue-ids a,b]');
+    console.log('Usage: mm task create <title> --sprint-id <sprint_id> [--phase-id <phase_id>] [--number N] [--issue-ids a,b]');
     return null;
   }
   const now = new Date().toISOString();
   const id = opts.id || makeId('task');
+  const number = opts.number
+    ? parseOrdinal(opts.number, 'task number')
+    : await nextTaskNumber({ sprintId: opts['sprint-id'], phaseId: opts['phase-id'] });
   return appendHistory({
     id,
     kind: 'task',
+    number,
     sprintId: opts['sprint-id'],
     ...(opts['phase-id'] ? { phaseId: opts['phase-id'] } : {}),
     issueIds: splitList(opts['issue-ids']),
@@ -77,7 +121,7 @@ export async function run(argv) {
   const json = argv.includes('--json');
 
   if (sub === 'create') {
-    const task = createTask(parseArgs(argv, 2));
+    const task = await createTask(parseArgs(argv, 2));
     if (!task) return;
     await assertEntityExists(task.sprintId, 'sprint', 'sprint');
     if (task.phaseId) await assertEntityExists(task.phaseId, 'phase', 'phase');
@@ -95,12 +139,14 @@ export async function run(argv) {
   if (sub === 'list') {
     const opts = parseArgs(argv, 2);
     const items = await listRecordsWithIndexFallback(taskRoot, indexFile);
-    const filtered = items.filter(item => {
-      if (opts.status && item.status !== opts.status) return false;
-      if (opts['sprint-id'] && item.sprintId !== opts['sprint-id']) return false;
-      if (opts['phase-id'] && item.phaseId !== opts['phase-id']) return false;
-      return true;
-    });
+    const filtered = items
+      .filter(item => {
+        if (opts.status && item.status !== opts.status) return false;
+        if (opts['sprint-id'] && item.sprintId !== opts['sprint-id']) return false;
+        if (opts['phase-id'] && item.phaseId !== opts['phase-id']) return false;
+        return true;
+      })
+      .sort(compareNumberedRecords);
     if (json) {
       writeJsonOutput({ ok: true, items: filtered });
       return;
@@ -109,7 +155,10 @@ export async function run(argv) {
       console.log('No tasks found.');
       return;
     }
-    filtered.forEach(item => console.log(`${item.id} [${item.status}] ${item.title}`));
+    filtered.forEach(item => {
+      const number = item.number ? `#${item.number} ` : '';
+      console.log(`${item.id} [${item.status}] ${number}${item.title}`);
+    });
     return;
   }
 

@@ -47,6 +47,8 @@ Stop if the target can't be resolved, the workspace is unhealthy, or the context
 
 ## 3. Capture and reconcile raw information
 
+Use raw intake for unverified source material, external files, transcripts, screenshots, and notes that still need triage. If a chat thread or bug-hunt pass has already produced verified, actionable findings, create issues directly with `mm issue create` and skip raw intake.
+
 ```bash
 mm raw add --text "A user reported that image ingestion rejects valid PNG files."
 mm raw list
@@ -91,6 +93,8 @@ Use this when the raw item should become canonical knowledge rather than an issu
 ```text
 initiative -> sprint -> phase -> task -> evidence
 ```
+
+`mm sprint create` assigns the next global sprint number automatically. `mm phase create` assigns the next phase number within the sprint. `mm task create` assigns the next task number within its phase, or within the sprint when no phase is set.
 
 ```bash
 mm initiative create "Improve agentic hardening" \
@@ -158,7 +162,7 @@ mm issue close issue_...
 
 ## 7. Compose bug findings into a sprint
 
-After a bug hunt or audit creates multiple issues, compose them into an execution slice without hand-editing tracker files:
+After a bug hunt, audit, or chat planning pass creates multiple issues, compose them into an execution slice without hand-editing tracker files:
 
 ```bash
 mm sprint compose "Fix audited CLI workflow gaps" \
@@ -168,7 +172,15 @@ mm sprint compose "Fix audited CLI workflow gaps" \
   --json
 ```
 
-This creates one sprint, one phase, and one task per issue. The tasks inherit issue acceptance criteria and verification plans when present, and the sprint/phase task id lists are backfilled so lint can validate the tracker graph.
+This creates one numbered sprint, phase `1`, and one numbered task per issue. The tasks inherit issue acceptance criteria and verification plans when present, and the sprint/phase task id lists are backfilled so lint can validate the tracker graph.
+
+Close the sprint from the CLI once the work is truly done by supplying the completion gate at update time:
+
+```bash
+mm sprint update sprint_... completed \
+  --success-gates "linked tasks pass targeted tests,closeout summary published" \
+  --note "Sprint closed after verification."
+```
 
 ## 8. Context retrieval for agents
 

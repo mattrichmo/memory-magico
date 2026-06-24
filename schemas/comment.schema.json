@@ -142,6 +142,37 @@
         }
       }
     },
+    "target": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": ["id", "kind"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "kind": { "type": "string", "minLength": 1 },
+        "path": { "type": ["string", "null"] },
+        "url": { "type": ["string", "null"] }
+      }
+    },
+    "bodyMarkdown": { "type": ["string", "null"] },
+    "sourceType": { "type": ["string", "null"] },
+    "author": { "type": ["string", "null"] },
+    "reconciliationStatus": {
+      "type": ["string", "null"],
+      "enum": ["unreconciled", "needs_research", "promoted_to_issue", "folded_into_issue", "duplicate", "deferred", "rejected", "resolved_by_existing_code", "superseded", "archived_resolved_history", null]
+    },
+    "containerId": { "type": ["string", "null"], "pattern": "^container_[a-z0-9][a-z0-9_-]*$" },
+    "relatedDiscoveryIds": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "uniqueItems": true,
+      "default": []
+    },
+    "relatedIssueIds": {
+      "type": "array",
+      "items": { "type": "string", "pattern": "^issue_[a-z0-9][a-z0-9_-]*$" },
+      "uniqueItems": true,
+      "default": []
+    },
     "paths": {
       "type": "object",
       "additionalProperties": false,

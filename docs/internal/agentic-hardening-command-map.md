@@ -37,7 +37,7 @@ Current truth for the CLI command surface. `src/core/command-registry.mjs` and `
 | `mm initiative` | work | work records | work records | yes | repo-write | Lists, shows, creates, or updates initiatives. |
 | `mm issue` | work | work records | work records | yes | repo-write | Creates and manages issue lifecycle/verification. |
 | `mm discovery` | work | work records | work records | yes | repo-write | Creates and manages discoveries. |
-| `mm comment` | work | work records | work records | yes | repo-write | Creates comments attached to entities. |
+| `mm comment` | work | work records | work records | yes | repo-write | Creates comments attached to issues, discoveries, or raw items. |
 | `mm wiki` | wiki | wiki pages | wiki pages + index | yes | repo-write + workspace-write | Creates, updates, links, and reads wiki pages. |
 | `mm graph` | graph | graph/workspace | relationships ledger | yes | repo-write | Adds, rebuilds, validates, and queries relationships. |
 | `mm fsck` | doctor | yes | no | yes | no | Consistency checks across lint, graph, index, and IDs. |

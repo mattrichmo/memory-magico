@@ -33,6 +33,7 @@ function genericIndexRecord(item) {
     title: item.title,
     summary: item.summary,
     status: item.status,
+    number: item.number,
     issueType: item.issueType,
     severity: item.severity,
     confidence: item.confidence,
@@ -53,6 +54,106 @@ function genericIndexRecord(item) {
     completedAt: item.completedAt,
     closedAt: item.closedAt,
     archivedAt: item.archivedAt,
+  };
+}
+
+function positiveInteger(value) {
+  const number = Number(value);
+  return Number.isInteger(number) && number > 0 ? number : null;
+}
+
+function compareWorkRecords(a, b) {
+  const aTime = a.createdAt || a.updatedAt || '';
+  const bTime = b.createdAt || b.updatedAt || '';
+  if (aTime !== bTime) return aTime.localeCompare(bTime);
+  return String(a.id || '').localeCompare(String(b.id || ''));
+}
+
+function assignMissingNumbers(records) {
+  const used = new Set();
+  const missing = [];
+
+  for (const record of [...records].sort(compareWorkRecords)) {
+    const number = positiveInteger(record.number);
+    if (number && !used.has(number)) {
+      used.add(number);
+    } else {
+      missing.push(record);
+    }
+  }
+
+  let next = 1;
+  let changed = 0;
+  for (const record of missing) {
+    while (used.has(next)) next += 1;
+    record.number = next;
+    used.add(next);
+    changed += 1;
+  }
+
+  return changed;
+}
+
+function taskNumberScope(item) {
+  if (item.phaseId) return `phase:${item.phaseId}`;
+  if (item.sprintId) return `sprint:${item.sprintId}`;
+  return '__unscoped__';
+}
+
+export async function backfillWorkItemNumbers({ rebuild = true } = {}) {
+  const sprintScope = WORK_SCOPES.find(scope => scope.kind === 'sprint');
+  const phaseScope = WORK_SCOPES.find(scope => scope.kind === 'phase');
+  const taskScope = WORK_SCOPES.find(scope => scope.kind === 'task');
+  const result = {
+    sprints: 0,
+    phases: 0,
+    tasks: 0,
+  };
+
+  const sprints = await listRecords(sprintScope.dir);
+  result.sprints = assignMissingNumbers(sprints);
+  for (const sprint of sprints) {
+    await persistRecord(sprintScope.dir, sprintScope.index, sprint, genericIndexRecord);
+  }
+
+  const phases = await listRecords(phaseScope.dir);
+  const phaseGroups = new Map();
+  for (const phase of phases) {
+    const sprintId = phase.sprintId || '__unscoped__';
+    if (!phaseGroups.has(sprintId)) phaseGroups.set(sprintId, []);
+    phaseGroups.get(sprintId).push(phase);
+  }
+  for (const group of phaseGroups.values()) {
+    result.phases += assignMissingNumbers(group);
+  }
+  for (const phase of phases) {
+    await persistRecord(phaseScope.dir, phaseScope.index, phase, genericIndexRecord);
+  }
+
+  const tasks = await listRecords(taskScope.dir);
+  const taskGroups = new Map();
+  for (const task of tasks) {
+    const scope = taskNumberScope(task);
+    if (!taskGroups.has(scope)) taskGroups.set(scope, []);
+    taskGroups.get(scope).push(task);
+  }
+  for (const group of taskGroups.values()) {
+    result.tasks += assignMissingNumbers(group);
+  }
+  for (const task of tasks) {
+    await persistRecord(taskScope.dir, taskScope.index, task, genericIndexRecord);
+  }
+
+  if (!rebuild) return result;
+  const index = await rebuildIndex();
+  const graph = await rebuildGraphRelationships();
+  return {
+    ...result,
+    search: {
+      pages: index.pageCount,
+      chunks: index.chunkCount,
+    },
+    graph: graph.length,
   };
 }
 
@@ -136,6 +237,13 @@ export async function importLegacyEntityRecords({ kinds = null, rebuild = true }
 }
 
 const MIGRATIONS = [
+  {
+    version: '2026-06-24-backfill-work-item-numbers',
+    description: 'Backfill missing sprint numbers globally plus phase/task numbers within their work scope.',
+    async run() {
+      return backfillWorkItemNumbers();
+    },
+  },
   {
     version: '2026-06-23-import-legacy-entity-records',
     description: 'Import legacy JSON entity records into memory/work without deleting the old files.',

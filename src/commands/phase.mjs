@@ -28,24 +28,47 @@ function toIndexRecord(item) {
   };
 }
 
+function parseOrdinal(value, label) {
+  if (value === true || value === false) {
+    throw new Error(`${label} must be a positive integer`);
+  }
+  const number = Number(value);
+  if (!Number.isInteger(number) || number < 1) {
+    throw new Error(`${label} must be a positive integer`);
+  }
+  return number;
+}
+
 async function nextPhaseNumber(sprintId) {
   const items = await listRecords(phaseRoot);
   const numbers = items
     .filter(item => item.sprintId === sprintId)
     .map(item => Number(item.number))
-    .filter(Number.isFinite);
+    .filter(number => Number.isInteger(number) && number > 0);
   return numbers.length ? Math.max(...numbers) + 1 : 1;
+}
+
+function compareNumberedRecords(a, b) {
+  const aNum = Number(a.number || 0);
+  const bNum = Number(b.number || 0);
+  if (aNum && bNum && aNum !== bNum) return aNum - bNum;
+  if (aNum && !bNum) return -1;
+  if (!aNum && bNum) return 1;
+  const aTime = a.createdAt || a.updatedAt || '';
+  const bTime = b.createdAt || b.updatedAt || '';
+  if (aTime !== bTime) return aTime.localeCompare(bTime);
+  return String(a.id || '').localeCompare(String(b.id || ''));
 }
 
 async function createPhase(opts) {
   const title = (opts.title || opts._.join(' ')).trim();
   if (!title || !opts['sprint-id']) {
-    console.log('Usage: mm phase create <title> --sprint-id <sprint_id> [--number N] [--issue-ids a,b]');
+    console.log('Usage: mm phase create <title> --sprint-id <sprint_id> [--number N] [--issue-ids a,b] [--success-gates "a,b"]');
     return null;
   }
   const now = new Date().toISOString();
   const id = opts.id || makeId('phase');
-  const number = opts.number ? Number(opts.number) : await nextPhaseNumber(opts['sprint-id']);
+  const number = opts.number ? parseOrdinal(opts.number, 'phase number') : await nextPhaseNumber(opts['sprint-id']);
   const status = opts.status || 'planned';
   assertEnum(status, ENUMS.phaseStatus, 'phase status');
   return appendHistory({
@@ -99,11 +122,13 @@ export async function run(argv) {
   if (sub === 'list') {
     const opts = parseArgs(argv, 2);
     const items = await listRecordsWithIndexFallback(phaseRoot, indexFile);
-    const filtered = items.filter(item => {
-      if (opts.status && item.status !== opts.status) return false;
-      if (opts['sprint-id'] && item.sprintId !== opts['sprint-id']) return false;
-      return true;
-    });
+    const filtered = items
+      .filter(item => {
+        if (opts.status && item.status !== opts.status) return false;
+        if (opts['sprint-id'] && item.sprintId !== opts['sprint-id']) return false;
+        return true;
+      })
+      .sort(compareNumberedRecords);
     if (json) {
       writeJsonOutput({ ok: true, items: filtered });
       return;
@@ -112,7 +137,10 @@ export async function run(argv) {
       console.log('No phases found.');
       return;
     }
-    filtered.forEach(item => console.log(`${item.id} [${item.status}] ${item.title}`));
+    filtered.forEach(item => {
+      const number = item.number ? `#${item.number} ` : '';
+      console.log(`${item.id} [${item.status}] ${number}${item.title}`);
+    });
     return;
   }
 
@@ -140,7 +168,7 @@ export async function run(argv) {
     const status = argv[3];
     const opts = parseArgs(argv, 4);
     if (!id || !status) {
-      console.log('Usage: mm phase update <id> <status> [--task-ids a,b] [--note "..."]');
+      console.log('Usage: mm phase update <id> <status> [--task-ids a,b] [--success-gates "a,b"] [--note "..."]');
       return;
     }
     const phase = await loadPhase(id);
@@ -149,9 +177,6 @@ export async function run(argv) {
       return;
     }
     assertEnum(status, ENUMS.phaseStatus, 'phase status');
-    if (status === 'completed') {
-      assertMeaningfulList(phase.successGates, 'completed phase success gates');
-    }
     phase.status = status;
     if (opts.title) phase.title = opts.title;
     if (opts.description) phase.description = opts.description;
@@ -159,6 +184,9 @@ export async function run(argv) {
     if (opts['task-ids']) phase.taskIds = splitList(opts['task-ids']);
     if (opts['success-gates']) phase.successGates = splitList(opts['success-gates']);
     if (opts.notes) phase.notes = opts.notes;
+    if (status === 'completed') {
+      assertMeaningfulList(phase.successGates, 'completed phase success gates');
+    }
     const now = new Date().toISOString();
     phase.updatedAt = now;
     if (status === 'completed') phase.completedAt = now;

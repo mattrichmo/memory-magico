@@ -98,7 +98,7 @@ mm image add <path>
 mm ingest <raw-id> [--json]
 ```
 
-Raw intake captures source material before anyone decides what it means. Treat it as immutable and untrusted. Reconciliation is the step that decides whether an item is new, stale, a duplicate, rejected, or already represented in canonical memory.
+Raw intake captures source material before anyone decides what it means. Treat it as immutable and untrusted. Reconciliation is the step that decides whether an item is new, stale, a duplicate, rejected, or already represented in canonical memory. Verified chat findings can be created directly as issues and composed into sprints; they do not need a raw item first.
 
 ## Work management
 
@@ -149,10 +149,18 @@ mm sprint compose "Fix discovered CLI bugs" \
   --phase-title "Bug fixes" \
   --success-gates "all linked tasks have verification evidence"
 
+mm migrate run 2026-06-24-backfill-work-item-numbers
+
+mm sprint update sprint_... completed \
+  --success-gates "all 14 tasks verified,design-system closeout recorded" \
+  --note "Sprint closed after final review."
+
 mm discovery create "Raw command prints full payloads" \
   --summary "Raw output should have byte and line caps" \
   --recommended-action "promote_to_issue"
 ```
+
+Sprint creation assigns the next global sprint number automatically. Phase creation assigns the next number within the sprint. Task creation assigns the next number within its phase, or within the sprint when no phase is set. `mm sprint compose` creates a numbered sprint, phase `1`, and numbered tasks.
 
 ### Status and lifecycle values
 

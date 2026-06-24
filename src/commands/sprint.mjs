@@ -21,6 +21,7 @@ function toIndexRecord(item) {
   return {
     id: item.id,
     kind: 'sprint',
+    number: item.number,
     title: item.title,
     status: item.status,
     containerIds: item.containerIds,
@@ -33,6 +34,37 @@ function toIndexRecord(item) {
     updatedAt: item.updatedAt,
     completedAt: item.completedAt,
   };
+}
+
+function parseOrdinal(value, label) {
+  if (value === true || value === false) {
+    throw new Error(`${label} must be a positive integer`);
+  }
+  const number = Number(value);
+  if (!Number.isInteger(number) || number < 1) {
+    throw new Error(`${label} must be a positive integer`);
+  }
+  return number;
+}
+
+async function nextSprintNumber() {
+  const items = await listRecordsWithIndexFallback(sprintRoot, indexFile);
+  const numbers = items
+    .map(item => Number(item.number))
+    .filter(number => Number.isInteger(number) && number > 0);
+  return numbers.length ? Math.max(...numbers) + 1 : 1;
+}
+
+function compareNumberedRecords(a, b) {
+  const aNum = Number(a.number || 0);
+  const bNum = Number(b.number || 0);
+  if (aNum && bNum && aNum !== bNum) return aNum - bNum;
+  if (aNum && !bNum) return -1;
+  if (!aNum && bNum) return 1;
+  const aTime = a.createdAt || a.updatedAt || '';
+  const bTime = b.createdAt || b.updatedAt || '';
+  if (aTime !== bTime) return aTime.localeCompare(bTime);
+  return String(a.id || '').localeCompare(String(b.id || ''));
 }
 
 function toPhaseIndexRecord(item) {
@@ -56,6 +88,7 @@ function toTaskIndexRecord(item) {
   return {
     id: item.id,
     kind: 'task',
+    number: item.number,
     title: item.title,
     status: item.status,
     sprintId: item.sprintId,
@@ -70,19 +103,21 @@ function toTaskIndexRecord(item) {
   };
 }
 
-function createSprint(opts) {
+async function createSprint(opts) {
   const title = (opts.title || opts._.join(' ')).trim();
   if (!title) {
-    console.log('Usage: mm sprint create <title> [--goal "..."] [--initiative-ids a,b] [--issue-ids a,b] [--container-ids a,b]');
+    console.log('Usage: mm sprint create <title> [--number N] [--goal "..."] [--initiative-ids a,b] [--issue-ids a,b] [--container-ids a,b] [--success-gates "a,b"]');
     return null;
   }
   const now = new Date().toISOString();
   const id = opts.id || makeId('sprint');
+  const number = opts.number ? parseOrdinal(opts.number, 'sprint number') : await nextSprintNumber();
   const status = opts.status || 'planned';
   assertEnum(status, ENUMS.sprintStatus, 'sprint status');
   return appendHistory({
     id,
     kind: 'sprint',
+    number,
     title,
     description: opts.description || title,
     goal: opts.goal || title,
@@ -134,6 +169,12 @@ async function composeSprint(opts) {
   const now = new Date().toISOString();
   const sprintId = opts.id || makeId('sprint');
   const phaseId = opts['phase-id'] || makeId('phase');
+  const sprintNumber = opts['sprint-number'] ? parseOrdinal(opts['sprint-number'], 'sprint number') : await nextSprintNumber();
+  const phaseNumber = opts['phase-number']
+    ? parseOrdinal(opts['phase-number'], 'phase number')
+    : opts.number
+      ? parseOrdinal(opts.number, 'phase number')
+      : 1;
   const sprintStatus = opts.status || 'planned';
   assertEnum(sprintStatus, ENUMS.sprintStatus, 'sprint status');
   const requestedTaskIds = opts['task-ids'] ? splitList(opts['task-ids']) : [];
@@ -152,6 +193,7 @@ async function composeSprint(opts) {
     return appendHistory({
       id: taskId,
       kind: 'task',
+      number: index + 1,
       sprintId,
       phaseId,
       issueIds: [issue.id],
@@ -179,7 +221,7 @@ async function composeSprint(opts) {
     id: phaseId,
     kind: 'phase',
     sprintId,
-    number: opts.number ? Number(opts.number) : 1,
+    number: phaseNumber,
     title: opts['phase-title'] || 'Implementation',
     description: opts['phase-description'] || `Execute ${title}.`,
     status: 'planned',
@@ -198,6 +240,7 @@ async function composeSprint(opts) {
   const sprint = appendHistory({
     id: sprintId,
     kind: 'sprint',
+    number: sprintNumber,
     title,
     description: opts.description || title,
     goal: opts.goal || `Resolve ${issueIds.length} issue${issueIds.length === 1 ? '' : 's'}: ${issues.map(issue => issue.title || issue.id).join('; ')}`,
@@ -243,7 +286,7 @@ export async function run(argv) {
   const json = argv.includes('--json');
 
   if (sub === 'create') {
-    const sprint = createSprint(parseArgs(argv, 2));
+    const sprint = await createSprint(parseArgs(argv, 2));
     if (!sprint) return;
     await assertEntityListExists(sprint.containerIds, 'container', 'container');
     await assertEntityListExists(sprint.initiativeIds, 'initiative', 'initiative');
@@ -273,7 +316,9 @@ export async function run(argv) {
   if (sub === 'list') {
     const opts = parseArgs(argv, 2);
     const items = await listRecordsWithIndexFallback(sprintRoot, indexFile);
-    const filtered = items.filter(item => !opts.status || item.status === opts.status);
+    const filtered = items
+      .filter(item => !opts.status || item.status === opts.status)
+      .sort(compareNumberedRecords);
     if (json) {
       writeJsonOutput({ ok: true, items: filtered });
       return;
@@ -282,7 +327,10 @@ export async function run(argv) {
       console.log('No sprints found.');
       return;
     }
-    filtered.forEach(item => console.log(`${item.id} [${item.status}] ${item.title}`));
+    filtered.forEach(item => {
+      const number = item.number ? `#${item.number} ` : '';
+      console.log(`${item.id} [${item.status}] ${number}${item.title}`);
+    });
     return;
   }
 
@@ -310,7 +358,7 @@ export async function run(argv) {
     const status = argv[3];
     const opts = parseArgs(argv, 4);
     if (!id || !status) {
-      console.log('Usage: mm sprint update <id> <status> [--goal "..."] [--note "..."]');
+      console.log('Usage: mm sprint update <id> <status> [--goal "..."] [--success-gates "a,b"] [--note "..."]');
       return;
     }
     const sprint = await loadSprint(id);
@@ -319,9 +367,6 @@ export async function run(argv) {
       return;
     }
     assertEnum(status, ENUMS.sprintStatus, 'sprint status');
-    if (status === 'completed') {
-      assertMeaningfulList(sprint.successGates, 'completed sprint success gates');
-    }
     sprint.status = status;
     if (opts.title) sprint.title = opts.title;
     if (opts.description) sprint.description = opts.description;
@@ -333,6 +378,9 @@ export async function run(argv) {
     if (opts['task-ids']) sprint.taskIds = splitList(opts['task-ids']);
     if (opts['success-gates']) sprint.successGates = splitList(opts['success-gates']);
     if (opts['non-goals']) sprint.nonGoals = splitList(opts['non-goals']);
+    if (status === 'completed') {
+      assertMeaningfulList(sprint.successGates, 'completed sprint success gates');
+    }
     const now = new Date().toISOString();
     sprint.updatedAt = now;
     if (status === 'completed') sprint.completedAt = now;

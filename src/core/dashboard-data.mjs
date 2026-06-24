@@ -174,6 +174,7 @@ function buildSprintCards(sprints, phases, tasks, issues, containers) {
 
       return {
         id: sprint.id,
+        number: sprint.number || null,
         title: normalizeTitle(sprint, 'Sprint'),
         description: clampText(sprint.description || sprint.goal || ''),
         goal: sprint.goal || '',
@@ -215,6 +216,7 @@ function buildSprintCards(sprints, phases, tasks, issues, containers) {
             },
             tasks: phaseTasks.map(task => ({
               id: task.id,
+              number: task.number || null,
               title: normalizeTitle(task, 'Task'),
               status: task.status || 'unknown',
               tone: statusTone(task.status),

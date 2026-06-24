@@ -5,10 +5,13 @@ import { findRecordById, listRecordsWithIndexFallback, persistRecord } from '../
 import { findEntityRecord, inferKindFromId, resolveNodeRef, entityRefExists } from '../core/entities.mjs';
 import { parseArgs, splitList } from '../core/cli.mjs';
 import { ENUMS, assertEnum } from '../core/guards.mjs';
+import { InvalidArgumentError } from '../core/errors.mjs';
 import { writeJsonOutput } from '../core/renderers.mjs';
 
 const commentRoot = path.join(memoryRoot, 'work', 'comments');
 const indexFile = path.join(commentRoot, 'index.jsonl');
+const SUPPORTED_TARGET_KINDS = new Set(['issue', 'discovery', 'raw_item']);
+const NOTE_HISTORY_TARGET_KINDS = new Set(['initiative', 'sprint', 'phase', 'task']);
 
 function toIndexRecord(item) {
   return {
@@ -28,9 +31,6 @@ async function inferCommentContext(targetId) {
   const target = await findEntityRecord(targetId);
   if (!target) return { relatedIssueIds: [], relatedDiscoveryIds: [] };
   const kind = target.kind || inferKindFromId(targetId);
-  if (kind === 'container') {
-    return { containerId: targetId, relatedIssueIds: [], relatedDiscoveryIds: [] };
-  }
   if (kind === 'issue') {
     return {
       containerId: target.containerIds?.[0],
@@ -45,21 +45,26 @@ async function inferCommentContext(targetId) {
       relatedDiscoveryIds: [targetId],
     };
   }
-  if (kind === 'task') {
-    return {
-      containerId: target.containerIds?.[0],
-      relatedIssueIds: Array.isArray(target.issueIds) ? target.issueIds : [],
-      relatedDiscoveryIds: [],
-    };
-  }
-  if (kind === 'sprint') {
-    return {
-      containerId: target.containerIds?.[0],
-      relatedIssueIds: Array.isArray(target.issueIds) ? target.issueIds : [],
-      relatedDiscoveryIds: [],
-    };
+  if (kind === 'raw_item') {
+    return { relatedIssueIds: [], relatedDiscoveryIds: [] };
   }
   return { relatedIssueIds: [], relatedDiscoveryIds: [] };
+}
+
+function noteHistoryHint(target) {
+  if (!target?.id || !target?.kind || !NOTE_HISTORY_TARGET_KINDS.has(target.kind)) return '';
+  const status = target.status || '<current-status>';
+  return `Use \`mm ${target.kind} update ${target.id} ${status} --note "..."\` to record scope or acceptance notes on the work item history.`;
+}
+
+function assertSupportedCommentTarget(target) {
+  const kind = target?.kind || inferKindFromId(target?.id);
+  if (SUPPORTED_TARGET_KINDS.has(kind)) return;
+
+  const hint = NOTE_HISTORY_TARGET_KINDS.has(kind)
+    ? noteHistoryHint(target)
+    : 'Supported comment targets are issues, discoveries, and raw items.';
+  throw new InvalidArgumentError(`mm comment add does not support ${kind || 'unknown'} targets.`, { hint });
 }
 
 async function loadComment(id) {
@@ -79,9 +84,19 @@ export async function run(argv) {
     const opts = parseArgs(argv, 3);
     const text = opts.body || opts._.join(' ').trim();
     if (!targetId || !text) {
-      console.log('Usage: mm comment add <target-id> <text> [--container-id <id>] [--source-raw-item-ids a,b]');
+      console.log('Usage: mm comment add <issue|discovery|raw-id> <text> [--container-id <id>] [--source-raw-item-ids a,b]');
       return;
     }
+
+    const targetRecord = await findEntityRecord(targetId);
+    const target = targetRecord
+      ? {
+          id: targetRecord.id,
+          kind: targetRecord.kind || inferKindFromId(targetId),
+          status: targetRecord.status,
+        }
+      : { id: targetId, kind: inferKindFromId(targetId) };
+    assertSupportedCommentTarget(target);
 
     const inferred = await inferCommentContext(targetId);
     const now = new Date().toISOString();
@@ -93,6 +108,8 @@ export async function run(argv) {
       target: await resolveNodeRef(targetId),
       sourceType: opts['source-type'] || 'manual',
       ...(opts.author ? { author: opts.author } : {}),
+      title: opts.title || `Comment on ${targetId}`,
+      status: opts.status || 'draft',
       summary: opts.summary || text.slice(0, 200),
       bodyMarkdown: text,
       reconciliationStatus: opts['reconciliation-status'] || 'unreconciled',
@@ -104,8 +121,8 @@ export async function run(argv) {
         : inferred.relatedIssueIds,
       sourceRawItemIds: splitList(opts['source-raw-item-ids']),
       paths: {
-      ...(opts.source ? { source: opts.source } : {}),
-    },
+        ...(opts.source ? { source: opts.source } : {}),
+      },
       createdAt: now,
       updatedAt: now,
     };

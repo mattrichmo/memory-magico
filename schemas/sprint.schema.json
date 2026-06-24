@@ -34,6 +34,9 @@
     "desiredOutcome": { "type": ["string", "null"] },
     "goal": { "type": ["string", "null"] },
     "summary": { "type": ["string", "null"] },
+    "number": { "type": ["number", "null"], "minimum": 1 },
+    "startDate": { "type": ["string", "null"] },
+    "endDate": { "type": ["string", "null"] },
     "sprintId": { "type": ["string", "null"], "pattern": "^sprint_[a-z0-9][a-z0-9_-]*$" },
     "phaseId": { "type": ["string", "null"], "pattern": "^phase_[a-z0-9][a-z0-9_-]*$" },
     "issueIds": {
@@ -63,6 +66,30 @@
     "containerIds": {
       "type": "array",
       "items": { "type": "string", "pattern": "^container_[a-z0-9][a-z0-9_-]*$" },
+      "uniqueItems": true,
+      "default": []
+    },
+    "phaseIds": {
+      "type": "array",
+      "items": { "type": "string", "pattern": "^phase_[a-z0-9][a-z0-9_-]*$" },
+      "uniqueItems": true,
+      "default": []
+    },
+    "taskIds": {
+      "type": "array",
+      "items": { "type": "string", "pattern": "^task_[a-z0-9][a-z0-9_-]*$" },
+      "uniqueItems": true,
+      "default": []
+    },
+    "successGates": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "uniqueItems": true,
+      "default": []
+    },
+    "nonGoals": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
       "uniqueItems": true,
       "default": []
     },
@@ -151,6 +178,7 @@
       }
     },
     "createdAt": { "type": "string", "format": "date-time" },
-    "updatedAt": { "type": "string", "format": "date-time" }
+    "updatedAt": { "type": "string", "format": "date-time" },
+    "completedAt": { "type": ["string", "null"], "format": "date-time" }
   }
 }

@@ -658,6 +658,10 @@ test('sprint launcher exposes full tracker creation workflow', async () => {
   ];
   const requiredTools = [
     'mm issue create',
+    'mm initiative create',
+    'mm initiative list',
+    'mm initiative show',
+    'mm initiative update',
     'mm sprint compose',
     'mm sprint create',
     'mm sprint update',
@@ -673,8 +677,363 @@ test('sprint launcher exposes full tracker creation workflow', async () => {
       assert.match(text, new RegExp(`^\\s+- ${tool}$`, 'm'), `${relPath} does not allow ${tool}`);
     }
     assert.match(text, /Tracker Creation Workflow/, `${relPath} lacks tracker creation instructions`);
+    assert.match(text, /create or reuse an initiative first/i, `${relPath} lacks initiative guidance`);
+    assert.match(text, /do not create a raw item just to satisfy a promotion path/i, `${relPath} lacks direct chat-to-issue guidance`);
+    assert.match(text, /automatically assigned sprint, phase, and task numbers/i, `${relPath} lacks numbering guidance`);
     assert.match(text, /Do not claim task, phase, or sprint creation is unavailable/, `${relPath} lacks regression guardrail`);
   }
+});
+
+test('mm sprint and phase create assign stable index numbers', async () => {
+  const suffix = makeId('numbers').replace(/^numbers_/, '');
+  const sprintA = `sprint_numbers_${suffix}_a`;
+  const sprintB = `sprint_numbers_${suffix}_b`;
+  const phaseA = `phase_numbers_${suffix}_a`;
+  const phaseB = `phase_numbers_${suffix}_b`;
+  const phaseOther = `phase_numbers_${suffix}_other`;
+  const taskA = `task_numbers_${suffix}_a`;
+  const taskB = `task_numbers_${suffix}_b`;
+  const taskOther = `task_numbers_${suffix}_other`;
+  const indexFiles = [
+    'memory/work/sprints/index.jsonl',
+    'memory/work/phases/index.jsonl',
+    'memory/work/tasks/index.jsonl',
+  ];
+  const snapshots = new Map();
+  const generatedPaths = [
+    `memory/work/sprints/${sprintA}.md`,
+    `memory/work/sprints/${sprintB}.md`,
+    `memory/work/phases/${phaseA}.md`,
+    `memory/work/phases/${phaseB}.md`,
+    `memory/work/phases/${phaseOther}.md`,
+    `memory/work/tasks/${taskA}.md`,
+    `memory/work/tasks/${taskB}.md`,
+    `memory/work/tasks/${taskOther}.md`,
+  ];
+
+  try {
+    for (const relPath of indexFiles) {
+      snapshots.set(relPath, await fs.readFile(path.join(repoRoot, relPath), 'utf8').catch(() => null));
+    }
+
+    const createdA = spawnSync('node', [
+      './bin/mm.mjs',
+      'sprint',
+      'create',
+      'Numbered sprint A',
+      '--id',
+      sprintA,
+      '--goal',
+      'Verify sprint number allocation',
+      '--json',
+    ], {
+      cwd: repoRoot,
+      encoding: 'utf8',
+    });
+    assert.equal(createdA.status, 0, createdA.stderr);
+    const sprintPayloadA = JSON.parse(createdA.stdout);
+    assert.equal(sprintPayloadA.ok, true);
+    assert.equal(Number.isInteger(sprintPayloadA.item.number), true);
+
+    const createdB = spawnSync('node', [
+      './bin/mm.mjs',
+      'sprint',
+      'create',
+      'Numbered sprint B',
+      '--id',
+      sprintB,
+      '--goal',
+      'Verify sprint number increments',
+      '--json',
+    ], {
+      cwd: repoRoot,
+      encoding: 'utf8',
+    });
+    assert.equal(createdB.status, 0, createdB.stderr);
+    const sprintPayloadB = JSON.parse(createdB.stdout);
+    assert.equal(sprintPayloadB.item.number, sprintPayloadA.item.number + 1);
+
+    const createdPhaseA = spawnSync('node', [
+      './bin/mm.mjs',
+      'phase',
+      'create',
+      'First numbered phase',
+      '--id',
+      phaseA,
+      '--sprint-id',
+      sprintA,
+      '--json',
+    ], {
+      cwd: repoRoot,
+      encoding: 'utf8',
+    });
+    assert.equal(createdPhaseA.status, 0, createdPhaseA.stderr);
+    const phasePayloadA = JSON.parse(createdPhaseA.stdout);
+    assert.equal(phasePayloadA.item.number, 1);
+
+    const createdPhaseB = spawnSync('node', [
+      './bin/mm.mjs',
+      'phase',
+      'create',
+      'Second numbered phase',
+      '--id',
+      phaseB,
+      '--sprint-id',
+      sprintA,
+      '--json',
+    ], {
+      cwd: repoRoot,
+      encoding: 'utf8',
+    });
+    assert.equal(createdPhaseB.status, 0, createdPhaseB.stderr);
+    const phasePayloadB = JSON.parse(createdPhaseB.stdout);
+    assert.equal(phasePayloadB.item.number, 2);
+
+    const createdOtherPhase = spawnSync('node', [
+      './bin/mm.mjs',
+      'phase',
+      'create',
+      'Other sprint first phase',
+      '--id',
+      phaseOther,
+      '--sprint-id',
+      sprintB,
+      '--json',
+    ], {
+      cwd: repoRoot,
+      encoding: 'utf8',
+    });
+    assert.equal(createdOtherPhase.status, 0, createdOtherPhase.stderr);
+    const otherPhasePayload = JSON.parse(createdOtherPhase.stdout);
+    assert.equal(otherPhasePayload.item.number, 1);
+
+    const createdTaskA = spawnSync('node', [
+      './bin/mm.mjs',
+      'task',
+      'create',
+      'First numbered task',
+      '--id',
+      taskA,
+      '--sprint-id',
+      sprintA,
+      '--phase-id',
+      phaseA,
+      '--json',
+    ], {
+      cwd: repoRoot,
+      encoding: 'utf8',
+    });
+    assert.equal(createdTaskA.status, 0, createdTaskA.stderr);
+    const taskPayloadA = JSON.parse(createdTaskA.stdout);
+    assert.equal(taskPayloadA.item.number, 1);
+
+    const createdTaskB = spawnSync('node', [
+      './bin/mm.mjs',
+      'task',
+      'create',
+      'Second numbered task',
+      '--id',
+      taskB,
+      '--sprint-id',
+      sprintA,
+      '--phase-id',
+      phaseA,
+      '--json',
+    ], {
+      cwd: repoRoot,
+      encoding: 'utf8',
+    });
+    assert.equal(createdTaskB.status, 0, createdTaskB.stderr);
+    const taskPayloadB = JSON.parse(createdTaskB.stdout);
+    assert.equal(taskPayloadB.item.number, 2);
+
+    const createdTaskOther = spawnSync('node', [
+      './bin/mm.mjs',
+      'task',
+      'create',
+      'Other phase first task',
+      '--id',
+      taskOther,
+      '--sprint-id',
+      sprintA,
+      '--phase-id',
+      phaseB,
+      '--json',
+    ], {
+      cwd: repoRoot,
+      encoding: 'utf8',
+    });
+    assert.equal(createdTaskOther.status, 0, createdTaskOther.stderr);
+    const taskPayloadOther = JSON.parse(createdTaskOther.stdout);
+    assert.equal(taskPayloadOther.item.number, 1);
+
+    const sprintList = spawnSync('node', ['./bin/mm.mjs', 'sprint', 'list'], {
+      cwd: repoRoot,
+      encoding: 'utf8',
+    });
+    assert.equal(sprintList.status, 0, sprintList.stderr);
+    assert.match(sprintList.stdout, new RegExp(`${sprintA} \\[planned\\] #${sprintPayloadA.item.number} Numbered sprint A`));
+
+    const phaseList = spawnSync('node', ['./bin/mm.mjs', 'phase', 'list', '--sprint-id', sprintA], {
+      cwd: repoRoot,
+      encoding: 'utf8',
+    });
+    assert.equal(phaseList.status, 0, phaseList.stderr);
+    assert.match(phaseList.stdout, new RegExp(`${phaseA} \\[planned\\] #1 First numbered phase`));
+    assert.match(phaseList.stdout, new RegExp(`${phaseB} \\[planned\\] #2 Second numbered phase`));
+
+    const taskList = spawnSync('node', ['./bin/mm.mjs', 'task', 'list', '--phase-id', phaseA], {
+      cwd: repoRoot,
+      encoding: 'utf8',
+    });
+    assert.equal(taskList.status, 0, taskList.stderr);
+    assert.match(taskList.stdout, new RegExp(`${taskA} \\[todo\\] #1 First numbered task`));
+    assert.match(taskList.stdout, new RegExp(`${taskB} \\[todo\\] #2 Second numbered task`));
+
+    const badNumber = spawnSync('node', [
+      './bin/mm.mjs',
+      'sprint',
+      'create',
+      'Bad numbered sprint',
+      '--number',
+      '0',
+    ], {
+      cwd: repoRoot,
+      encoding: 'utf8',
+    });
+    assert.notEqual(badNumber.status, 0);
+    assert.match(`${badNumber.stdout}\n${badNumber.stderr}`, /sprint number must be a positive integer/);
+
+    const sprintPage = await readMarkdownPage(path.join(repoRoot, 'memory/work/sprints', `${sprintA}.md`));
+    const phasePage = await readMarkdownPage(path.join(repoRoot, 'memory/work/phases', `${phaseB}.md`));
+    const taskPage = await readMarkdownPage(path.join(repoRoot, 'memory/work/tasks', `${taskB}.md`));
+    assert.equal(sprintPage.frontmatter.number, sprintPayloadA.item.number);
+    assert.equal(phasePage.frontmatter.number, 2);
+    assert.equal(taskPage.frontmatter.number, 2);
+  } finally {
+    for (const relPath of generatedPaths) {
+      await fs.rm(path.join(repoRoot, relPath), { force: true });
+    }
+    for (const [relPath, contents] of snapshots.entries()) {
+      const filePath = path.join(repoRoot, relPath);
+      if (contents === null) {
+        await fs.rm(filePath, { force: true });
+      } else {
+        await fs.mkdir(path.dirname(filePath), { recursive: true });
+        await fs.writeFile(filePath, contents, 'utf8');
+      }
+    }
+  }
+});
+
+test('mm comment add persists issue target metadata and stays lint-clean', async () => {
+  const suffix = makeId('comment').replace(/^comment_/, '');
+  const issueId = `issue_comment_${suffix}`;
+  const commentId = `comment_comment_${suffix}`;
+  const indexFiles = [
+    'memory/work/issues/index.jsonl',
+    'memory/work/comments/index.jsonl',
+  ];
+  const snapshots = new Map();
+  const generatedPaths = [
+    `memory/work/issues/${issueId}.md`,
+    `memory/work/comments/${commentId}.md`,
+  ];
+
+  try {
+    for (const relPath of indexFiles) {
+      snapshots.set(relPath, await fs.readFile(path.join(repoRoot, relPath), 'utf8').catch(() => null));
+    }
+
+    const createdIssue = spawnSync('node', [
+      './bin/mm.mjs',
+      'issue',
+      'create',
+      'Comment target issue',
+      '--id',
+      issueId,
+      '--issue-type',
+      'bug',
+      '--severity',
+      'P2',
+      '--confidence',
+      'confirmed',
+      '--risk',
+      'Issue exists to verify comment targets persist cleanly',
+      '--acceptance',
+      'Comment target is valid',
+      '--verification',
+      'Run lint after writing the comment',
+      '--json',
+    ], {
+      cwd: repoRoot,
+      encoding: 'utf8',
+    });
+    assert.equal(createdIssue.status, 0, createdIssue.stderr);
+
+    const createdComment = spawnSync('node', [
+      './bin/mm.mjs',
+      'comment',
+      'add',
+      issueId,
+      'Reviewer confirmed reproduction.',
+      '--id',
+      commentId,
+      '--json',
+    ], {
+      cwd: repoRoot,
+      encoding: 'utf8',
+    });
+    assert.equal(createdComment.status, 0, createdComment.stderr);
+    const commentPayload = JSON.parse(createdComment.stdout);
+    assert.equal(commentPayload.ok, true);
+    assert.equal(commentPayload.item.id, commentId);
+    assert.equal(commentPayload.item.target.id, issueId);
+
+    const commentPage = await readMarkdownPage(path.join(repoRoot, 'memory/work/comments', `${commentId}.md`));
+    assert.equal(commentPage.frontmatter.target.id, issueId);
+    assert.equal(commentPage.frontmatter.target.kind, 'issue');
+    assert.deepEqual(commentPage.frontmatter.relatedIssueIds, [issueId]);
+    assert.equal(commentPage.frontmatter.bodyMarkdown, 'Reviewer confirmed reproduction.');
+
+    const lint = spawnSync('node', ['./bin/mm.mjs', 'lint', '--json'], {
+      cwd: repoRoot,
+      encoding: 'utf8',
+    });
+    assert.equal(lint.status, 0, lint.stderr);
+    const lintPayload = JSON.parse(lint.stdout);
+    assert.equal(lintPayload.ok, true);
+  } finally {
+    for (const relPath of generatedPaths) {
+      await fs.rm(path.join(repoRoot, relPath), { force: true });
+    }
+    for (const [relPath, contents] of snapshots.entries()) {
+      const filePath = path.join(repoRoot, relPath);
+      if (contents === null) {
+        await fs.rm(filePath, { force: true });
+      } else {
+        await fs.mkdir(path.dirname(filePath), { recursive: true });
+        await fs.writeFile(filePath, contents, 'utf8');
+      }
+    }
+  }
+});
+
+test('mm comment add rejects task targets and points callers to task history notes', () => {
+  const result = spawnSync('node', [
+    './bin/mm.mjs',
+    'comment',
+    'add',
+    'task_mqiarfrs_uggdg9',
+    'Scope note that belongs on the task history.',
+  ], {
+    cwd: repoRoot,
+    encoding: 'utf8',
+  });
+  assert.notEqual(result.status, 0);
+  const output = `${result.stdout}\n${result.stderr}`;
+  assert.match(output, /mm comment add does not support task targets/);
+  assert.match(output, /mm task update task_mqiarfrs_uggdg9 [a-z_]+ --note/);
 });
 
 test('mm sprint compose creates linked sprint phase and tasks from issues', async () => {
@@ -779,14 +1138,129 @@ test('mm sprint compose creates linked sprint phase and tasks from issues', asyn
     const payload = JSON.parse(composed.stdout);
     assert.equal(payload.ok, true);
     assert.equal(payload.sprint.id, sprintId);
+    assert.equal(Number.isInteger(payload.sprint.number), true);
     assert.deepEqual(payload.sprint.issueIds, [issueA, issueB]);
     assert.deepEqual(payload.sprint.phaseIds, [phaseId]);
     assert.deepEqual(payload.sprint.taskIds, [taskA, taskB]);
     assert.equal(payload.phase.id, phaseId);
+    assert.equal(payload.phase.number, 1);
     assert.deepEqual(payload.phase.taskIds, [taskA, taskB]);
     assert.equal(payload.tasks.length, 2);
+    assert.deepEqual(payload.tasks.map(task => task.number), [1, 2]);
     assert.deepEqual(payload.tasks.map(task => task.issueIds[0]), [issueA, issueB]);
     assert.deepEqual(payload.tasks.map(task => task.acceptanceCriteria[0]), [`Acceptance for ${issueA}`, `Acceptance for ${issueB}`]);
+
+    const lint = spawnSync('node', ['./bin/mm.mjs', 'lint', '--json'], {
+      cwd: repoRoot,
+      encoding: 'utf8',
+    });
+    assert.equal(lint.status, 0, lint.stderr);
+    const lintPayload = JSON.parse(lint.stdout);
+    assert.equal(lintPayload.ok, true);
+  } finally {
+    for (const relPath of generatedPaths) {
+      await fs.rm(path.join(repoRoot, relPath), { force: true });
+    }
+    for (const [relPath, contents] of snapshots.entries()) {
+      const filePath = path.join(repoRoot, relPath);
+      if (contents === null) {
+        await fs.rm(filePath, { force: true });
+      } else {
+        await fs.mkdir(path.dirname(filePath), { recursive: true });
+        await fs.writeFile(filePath, contents, 'utf8');
+      }
+    }
+  }
+});
+
+test('mm sprint and phase updates can complete with success gates supplied on the command', async () => {
+  const suffix = makeId('closeout').replace(/^closeout_/, '');
+  const sprintId = `sprint_closeout_${suffix}`;
+  const phaseId = `phase_closeout_${suffix}`;
+  const indexFiles = [
+    'memory/work/sprints/index.jsonl',
+    'memory/work/phases/index.jsonl',
+  ];
+  const generatedPaths = [
+    `memory/work/sprints/${sprintId}.md`,
+    `memory/work/phases/${phaseId}.md`,
+  ];
+  const snapshots = new Map();
+
+  try {
+    for (const relPath of indexFiles) {
+      snapshots.set(relPath, await fs.readFile(path.join(repoRoot, relPath), 'utf8').catch(() => null));
+    }
+
+    const createdSprint = spawnSync('node', [
+      './bin/mm.mjs',
+      'sprint',
+      'create',
+      'Closeout sprint',
+      '--id',
+      sprintId,
+      '--goal',
+      'Verify completion gating from the CLI',
+      '--json',
+    ], {
+      cwd: repoRoot,
+      encoding: 'utf8',
+    });
+    assert.equal(createdSprint.status, 0, createdSprint.stderr);
+
+    const createdPhase = spawnSync('node', [
+      './bin/mm.mjs',
+      'phase',
+      'create',
+      'Closeout phase',
+      '--id',
+      phaseId,
+      '--sprint-id',
+      sprintId,
+      '--json',
+    ], {
+      cwd: repoRoot,
+      encoding: 'utf8',
+    });
+    assert.equal(createdPhase.status, 0, createdPhase.stderr);
+
+    const completedSprint = spawnSync('node', [
+      './bin/mm.mjs',
+      'sprint',
+      'update',
+      sprintId,
+      'completed',
+      '--success-gates',
+      'all tasks verified,closeout summary recorded',
+      '--json',
+    ], {
+      cwd: repoRoot,
+      encoding: 'utf8',
+    });
+    assert.equal(completedSprint.status, 0, completedSprint.stderr);
+    const sprintPayload = JSON.parse(completedSprint.stdout);
+    assert.equal(sprintPayload.ok, true);
+    assert.equal(sprintPayload.item.status, 'completed');
+    assert.deepEqual(sprintPayload.item.successGates, ['all tasks verified', 'closeout summary recorded']);
+
+    const completedPhase = spawnSync('node', [
+      './bin/mm.mjs',
+      'phase',
+      'update',
+      phaseId,
+      'completed',
+      '--success-gates',
+      'targeted checks passed,deliverable reviewed',
+      '--json',
+    ], {
+      cwd: repoRoot,
+      encoding: 'utf8',
+    });
+    assert.equal(completedPhase.status, 0, completedPhase.stderr);
+    const phasePayload = JSON.parse(completedPhase.stdout);
+    assert.equal(phasePayload.ok, true);
+    assert.equal(phasePayload.item.status, 'completed');
+    assert.deepEqual(phasePayload.item.successGates, ['targeted checks passed', 'deliverable reviewed']);
 
     const lint = spawnSync('node', ['./bin/mm.mjs', 'lint', '--json'], {
       cwd: repoRoot,
@@ -1029,6 +1503,8 @@ test('mm install can target a top-level agent root with its own project pointer'
     assert.match(sprintSkill, /- `mm sprint create`/);
     assert.match(sprintSkill, /- `mm phase create`/);
     assert.match(sprintSkill, /- `mm task create`/);
+    assert.match(sprintSkill, /Persist new planning as sprint, phase, task, initiative, or issue records in this role, not raw notes\./);
+    assert.doesNotMatch(sprintSkill, /Persist material findings with `mm raw add --text "\.\.\."`\./);
 
     const info = spawnSync('node', [path.join(repoRoot, 'bin', 'mm.mjs'), 'info'], {
       cwd: topRoot,
@@ -1037,6 +1513,39 @@ test('mm install can target a top-level agent root with its own project pointer'
     assert.equal(info.status, 0, info.stderr);
     assert.match(info.stdout, /Project config:/);
     assert.match(info.stdout, /Workspace id:/);
+  } finally {
+    await fs.rm(tempRoot, { recursive: true, force: true });
+  }
+});
+
+test('mm install outputs role-aware persistence guidance', async () => {
+  const tempRoot = await fs.mkdtemp(path.join('/tmp', 'mm-install-guidance-'));
+  try {
+    const install = spawnSync('node', [
+      path.join(repoRoot, 'bin', 'mm.mjs'),
+      'install',
+      'all',
+      '--roles',
+      'memorymagico-sprint-launcher,memorymagico-work-closeout,memorymagico-handoff-builder',
+      '--install-root',
+      tempRoot,
+    ], {
+      cwd: repoRoot,
+      encoding: 'utf8',
+    });
+    assert.equal(install.status, 0, install.stderr);
+
+    const sprintSkill = await fs.readFile(path.join(tempRoot, '.agents', 'skills', 'memorymagico-sprint-launcher', 'SKILL.md'), 'utf8');
+    const sprintAgent = await fs.readFile(path.join(tempRoot, '.claude', 'agents', 'memorymagico-sprint-launcher.md'), 'utf8');
+    assert.match(sprintSkill, /Persist new planning as sprint, phase, task, initiative, or issue records in this role, not raw notes\./);
+    assert.match(sprintAgent, /Persist new planning as sprint, phase, task, initiative, or issue records in this role, not raw notes\./);
+    assert.doesNotMatch(sprintSkill, /Persist material findings with `mm raw add --text "\.\.\."`\./);
+
+    const closeoutSkill = await fs.readFile(path.join(tempRoot, '.agents', 'skills', 'memorymagico-work-closeout', 'SKILL.md'), 'utf8');
+    assert.match(closeoutSkill, /Promote verified actionable findings to canonical issues first; use `mm raw add --text "\.\.\."` only for unverified material or follow-ups that are not ready for tracker promotion\./);
+
+    const handoffSkill = await fs.readFile(path.join(tempRoot, '.agents', 'skills', 'memorymagico-handoff-builder', 'SKILL.md'), 'utf8');
+    assert.match(handoffSkill, /Persist the handoff with `mm raw add --text "\.\.\."` only when the user asks for durable storage or the handoff is needed for later resumption\./);
   } finally {
     await fs.rm(tempRoot, { recursive: true, force: true });
   }

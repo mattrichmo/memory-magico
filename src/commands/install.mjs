@@ -186,6 +186,42 @@ function parseRoleFilter(argv) {
   return value.split(',').map(role => role.trim()).filter(Boolean);
 }
 
+function persistenceGuidance(role) {
+  const canRawAdd = role.allowedTools.includes('mm raw add');
+  const canIssueCreate = role.allowedTools.includes('mm issue create');
+  const canSprintCreate = [
+    'mm sprint compose',
+    'mm sprint create',
+    'mm phase create',
+    'mm task create',
+    'mm initiative create',
+  ].some(tool => role.allowedTools.includes(tool));
+
+  if (role.slug === 'memorymagico-handoff-builder') {
+    return canRawAdd
+      ? 'Persist the handoff with `mm raw add --text "..."` only when the user asks for durable storage or the handoff is needed for later resumption.'
+      : 'Do not persist handoffs as raw notes unless `mm raw add` is listed in this role.';
+  }
+
+  if (canSprintCreate) {
+    return 'Persist new planning as sprint, phase, task, initiative, or issue records in this role, not raw notes.';
+  }
+
+  if (canRawAdd && canIssueCreate) {
+    return 'Promote verified actionable findings to canonical issues first; use `mm raw add --text "..."` only for unverified material or follow-ups that are not ready for tracker promotion.';
+  }
+
+  if (canRawAdd) {
+    return 'Use `mm raw add --text "..."` only for durable notes this role is meant to capture; do not turn transient planning or every finding into raw notes.';
+  }
+
+  if (canIssueCreate) {
+    return 'Promote verified actionable findings to canonical issues in this role; do not create raw notes unless a narrower role explicitly allows `mm raw add`.';
+  }
+
+  return 'Do not persist raw findings unless `mm raw add` is listed in this role.';
+}
+
 function argValue(argv, name) {
   const index = argv.indexOf(name);
   if (index === -1) return null;
@@ -262,7 +298,7 @@ function genSubagent(role) {
   // Map completion check commands from role: look for mm raw list or mm lint/doctor
   const hasRawList = role.allowedTools.includes('mm raw list');
   const completionCmds = ['mm doctor', ...(hasRawList ? ['mm raw list'] : [])].join('\n');
-  const canRawAdd = role.allowedTools.includes('mm raw add');
+  const guidance = persistenceGuidance(role);
 
   const preferred = role.slug === 'memorymagico-orchestrator'
     ? '\n## Preferred entrypoint\n\nUse this role first unless you intentionally want a specialist role directly.\n'
@@ -311,7 +347,7 @@ ${safetyBlock}
 ${completionCmds}
 \`\`\`
 
-${canRawAdd ? 'Persist material findings with `mm raw add --text "..."`.' : 'Do not create raw notes unless `mm raw add` is listed in your allowed tools.'}
+${guidance}
 `;
 }
 
@@ -349,7 +385,7 @@ function genCodexSkill(role) {
   const capabilityBlock = role.allowedCapabilities?.length
     ? `\n## Allowed Capability Tags\n\n${role.allowedCapabilities.map(tag => `- \`${tag}\``).join('\n')}\n`
     : '';
-  const canRawAdd = role.allowedTools.includes('mm raw add');
+  const guidance = persistenceGuidance(role);
   const completionChecks = [
     'mm info',
     ...(role.allowedTools.includes('mm doctor') ? ['mm doctor'] : []),
@@ -396,7 +432,7 @@ ${safetyBlock}
 - Prefer \`--json\` for commands that support it when parsing output.
 - Resolve/search before creating or updating memory.
 - Treat generated agent surfaces as outputs; edit \`agents/roles/*/AGENT.md\` in memory and regenerate.
-- ${canRawAdd ? 'Persist material findings with `mm raw add --text "..."`.' : 'Do not persist raw findings unless `mm raw add` is listed in this skill.'}
+- ${guidance}
 
 ## Completion Checks
 

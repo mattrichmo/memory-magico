@@ -16,6 +16,10 @@ allowed_tools:
   - mm sprint update
   - mm sprint show
   - mm sprint list
+  - mm initiative create
+  - mm initiative list
+  - mm initiative show
+  - mm initiative update
   - mm task create
   - mm task update
   - mm task show
@@ -59,10 +63,11 @@ Use this workflow when the user asks to create tracker structure or when no suit
 
 1. Inspect existing issues, tasks, phases, and sprints before creating anything.
 2. Create missing canonical issues first with `mm issue create` only for verified, actionable work that is not already represented.
-3. For the common bug-hunt/audit flow, prefer `mm sprint compose <title> --issue-ids ...` to create one sprint, one phase, and one task per linked issue.
-4. Use `mm sprint create`, `mm phase create`, and `mm task create` directly only when the desired structure needs custom staging beyond `mm sprint compose`.
-5. Backfill sprint/phase links with `mm sprint update` and `mm phase update` when task or phase ids were not known at creation time.
-6. Stop after tracker creation unless the user also asked to start implementation.
+3. When several sprints share one outcome, create or reuse an initiative first, then link the sprint set with `--initiative-ids`.
+4. For the common bug-hunt/audit flow, prefer `mm sprint compose <title> --issue-ids ...` to create one sprint, one phase, and one task per linked issue.
+5. Use `mm sprint create`, `mm phase create`, and `mm task create` directly only when the desired structure needs custom staging beyond `mm sprint compose`.
+6. Backfill sprint/phase links with `mm sprint update` and `mm phase update` when task or phase ids were not known at creation time.
+7. Stop after tracker creation unless the user also asked to start implementation.
 
 ## Launch Workflow
 
@@ -81,6 +86,8 @@ Use this workflow when the user asks to create tracker structure or when no suit
 - If the sprint is discovery-only, stay read-only and do not create a worktree unless work is expected.
 - If a task is not grounded in a valid sprint or phase, create or reconcile that tracker structure before launch.
 - If a raw item is stale or already captured elsewhere, do not relaunch it as fresh work.
+- If verified findings come from the current chat rather than an existing `raw_...` item, create issues and compose the sprint directly; do not create a raw item just to satisfy a promotion path.
+- Use the automatically assigned sprint, phase, and task numbers in summaries and handoffs so later agents can resolve references like "sprint 12", "phase 2", or "task 3".
 - Do not claim task, phase, or sprint creation is unavailable when `mm sprint compose`, `mm task create`, `mm phase create`, and `mm sprint create` are listed in this role.
 
 ## Completion Criteria

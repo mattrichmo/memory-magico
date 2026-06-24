@@ -47,6 +47,44 @@ function bodyForRecord(record) {
 
 function frontmatterForRecord(record, filePath = null) {
   const selfPath = filePath ? path.relative(memoryRoot, filePath).split(path.sep).join('/') : record?.paths?.self || null;
+  const sprintFields = record.kind === 'sprint'
+    ? {
+        number: record.number ?? null,
+        completedAt: record.completedAt || null,
+        startDate: record.startDate || null,
+        endDate: record.endDate || null,
+        phaseIds: record.phaseIds || [],
+        taskIds: record.taskIds || [],
+        successGates: record.successGates || [],
+        nonGoals: record.nonGoals || [],
+      }
+    : {};
+  const phaseFields = record.kind === 'phase'
+    ? {
+        completedAt: record.completedAt || null,
+        number: record.number ?? null,
+        taskIds: record.taskIds || [],
+        successGates: record.successGates || [],
+        notes: record.notes || null,
+      }
+    : {};
+  const taskFields = record.kind === 'task'
+    ? {
+        number: record.number ?? null,
+      }
+    : {};
+  const commentFields = record.kind === 'comment'
+    ? {
+        target: record.target || null,
+        bodyMarkdown: record.bodyMarkdown || null,
+        sourceType: record.sourceType || null,
+        author: record.author || null,
+        reconciliationStatus: record.reconciliationStatus || null,
+        containerId: record.containerId || null,
+        relatedDiscoveryIds: record.relatedDiscoveryIds || [],
+        relatedIssueIds: record.relatedIssueIds || [],
+      }
+    : {};
   return {
     id: record.id,
     kind: record.kind || 'note',
@@ -77,6 +115,10 @@ function frontmatterForRecord(record, filePath = null) {
     confidence: record.confidence || null,
     risk: record.risk || null,
     dependencies: record.dependencies || null,
+    ...sprintFields,
+    ...phaseFields,
+    ...taskFields,
+    ...commentFields,
     paths: {
       self: selfPath,
     },

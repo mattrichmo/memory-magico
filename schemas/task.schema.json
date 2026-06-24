@@ -34,6 +34,7 @@
     "desiredOutcome": { "type": ["string", "null"] },
     "goal": { "type": ["string", "null"] },
     "summary": { "type": ["string", "null"] },
+    "number": { "type": ["number", "null"], "minimum": 1 },
     "sprintId": { "type": ["string", "null"], "pattern": "^sprint_[a-z0-9][a-z0-9_-]*$" },
     "phaseId": { "type": ["string", "null"], "pattern": "^phase_[a-z0-9][a-z0-9_-]*$" },
     "issueIds": {
