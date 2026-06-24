@@ -4,6 +4,7 @@ import { run as infoRun } from '../commands/info.mjs';
 import { run as setupRun } from '../commands/setup.mjs';
 import { run as doctorRun } from '../commands/doctor.mjs';
 import { run as statusRun } from '../commands/status.mjs';
+import { run as traceRun } from '../commands/trace.mjs';
 import { run as safeRun } from '../commands/safe.mjs';
 import { run as auditRun } from '../commands/audit.mjs';
 import { run as lintRun } from '../commands/lint.mjs';
@@ -55,6 +56,7 @@ export const COMMAND_HANDLERS = {
   info: infoRun,
   setup: setupRun,
   status: statusRun,
+  trace: traceRun,
   safe: safeRun,
   audit: auditRun,
   doctor: doctorRun,

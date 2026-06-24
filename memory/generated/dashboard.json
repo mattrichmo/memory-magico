@@ -7,6 +7,7 @@
         "goal": "",
         "id": "sprint_mqiarcrd_v4dhbr",
         "issueSummaries": [],
+        "number": null,
         "phases": [],
         "progress": {
           "activeCount": 0,
@@ -47,6 +48,7 @@
     "recentSprints": [
       {
         "id": "sprint_mqiarcrd_v4dhbr",
+        "number": null,
         "title": "Smoke Sprint",
         "description": "",
         "goal": "",
@@ -69,6 +71,7 @@
     "sprints": [
       {
         "id": "sprint_mqiarcrd_v4dhbr",
+        "number": null,
         "title": "Smoke Sprint",
         "description": "",
         "goal": "",
@@ -106,11 +109,149 @@
       }
     ]
   },
-  "generatedAt": "2026-06-17T20:57:14.813Z",
+  "generatedAt": "2026-06-24T14:45:31.923Z",
   "indices": {
-    "sprintSummaryCount": 0,
-    "taskSummaryCount": 0
+    "sprintSummaryCount": 1,
+    "taskSummaryCount": 1
   },
+  "routes": [
+    {
+      "canonical": true,
+      "domain": "system",
+      "endpoint": "/api/dashboard",
+      "id": "home",
+      "kind": "home",
+      "label": "Home",
+      "readOnly": true
+    },
+    {
+      "canonical": true,
+      "domain": "work",
+      "endpoint": "/api/work/sprints",
+      "id": "sprints",
+      "kind": "sprint",
+      "label": "Sprints",
+      "readOnly": true
+    },
+    {
+      "canonical": true,
+      "domain": "work",
+      "endpoint": "/api/work/phases",
+      "id": "phases",
+      "kind": "phase",
+      "label": "Phases",
+      "readOnly": true
+    },
+    {
+      "canonical": true,
+      "domain": "work",
+      "endpoint": "/api/work/tasks",
+      "id": "tasks",
+      "kind": "task",
+      "label": "Tasks",
+      "readOnly": true
+    },
+    {
+      "canonical": true,
+      "domain": "work",
+      "endpoint": "/api/work/issues",
+      "id": "issues",
+      "kind": "issue",
+      "label": "Issues",
+      "readOnly": true
+    },
+    {
+      "canonical": false,
+      "domain": "work",
+      "endpoint": "/api/work/issues?issueType=bug",
+      "id": "bugs",
+      "kind": "issue",
+      "label": "Bugs",
+      "readOnly": true,
+      "viewOf": "issues"
+    },
+    {
+      "canonical": true,
+      "domain": "work",
+      "endpoint": "/api/work/discoveries",
+      "id": "discoveries",
+      "kind": "discovery",
+      "label": "Discoveries",
+      "readOnly": true
+    },
+    {
+      "canonical": true,
+      "domain": "work",
+      "endpoint": "/api/work/containers",
+      "id": "containers",
+      "kind": "container",
+      "label": "Containers",
+      "readOnly": true
+    },
+    {
+      "canonical": true,
+      "domain": "work",
+      "endpoint": "/api/work/initiatives",
+      "id": "initiatives",
+      "kind": "initiative",
+      "label": "Initiatives",
+      "readOnly": true
+    },
+    {
+      "canonical": true,
+      "domain": "knowledge",
+      "endpoint": "/api/knowledge/comments",
+      "id": "comments",
+      "kind": "comment",
+      "label": "Comments",
+      "readOnly": true
+    },
+    {
+      "canonical": true,
+      "domain": "knowledge",
+      "endpoint": "/api/knowledge/claims",
+      "id": "claims",
+      "kind": "claim",
+      "label": "Claims",
+      "readOnly": true
+    },
+    {
+      "canonical": true,
+      "domain": "knowledge",
+      "endpoint": "/api/knowledge/wiki",
+      "id": "wiki",
+      "kind": "wiki",
+      "label": "Wiki",
+      "readOnly": true
+    },
+    {
+      "canonical": true,
+      "domain": "intake",
+      "endpoint": "/api/intake/raw",
+      "id": "raw",
+      "kind": "raw",
+      "label": "Raw Intake",
+      "readOnly": true
+    },
+    {
+      "canonical": true,
+      "domain": "graph",
+      "endpoint": "/api/graph",
+      "id": "graph",
+      "kind": "edge",
+      "label": "Graph",
+      "readOnly": true
+    },
+    {
+      "canonical": true,
+      "domain": "system",
+      "endpoint": "/api/system/status",
+      "id": "system",
+      "kind": "system",
+      "label": "System",
+      "readOnly": true
+    }
+  ],
   "summary": {
     "comments": {
       "total": 0
@@ -129,6 +270,7 @@
     "issues": {
       "bySeverity": {},
       "byStatus": {},
+      "byType": {},
       "open": 0,
       "total": 0
     },
@@ -148,11 +290,11 @@
       "total": 2
     },
     "search": {
-      "builtAt": "2026-06-17T20:49:55.521Z",
-      "chunks": 40,
+      "builtAt": "2026-06-18T16:26:09.424Z",
+      "chunks": 37,
       "indexed": true,
       "mode": "hybrid",
-      "pages": 8,
+      "pages": 9,
       "ready": true,
       "vectorDims": 2048
     },

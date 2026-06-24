@@ -32,6 +32,27 @@ mm schema validate <schema-file> [data-file]
 | `mm ledger` | Inspects or repairs JSON/JSONL ledgers; repair can quarantine malformed lines. |
 | `mm schema` | Lists, shows, or validates schema definitions. |
 
+## Trace logging
+
+```bash
+mm trace on [--verbose|--level basic|verbose|debug] [--idle-timeout-minutes N] [--json]
+mm trace off [--json]
+mm trace status [--json]
+mm trace mark "security audit cleanup"
+mm trace context set --agent codex --upstream-session <id> --label "audit pass"
+mm trace context clear
+mm trace sessions [--limit N] [--json]
+mm trace show <session-id> [--json]
+
+mm logging yes
+mm logging no
+mm logging status
+```
+
+Trace logging is optional and records observable `mm` command activity into `memory/.mm/trace/events/*.jsonl`. It can infer local activity sessions from the same workspace, cwd, host, user, and idle window, and can carry optional upstream context labels when an agent or human provides them. It does not claim to know the original Codex/Claude prompt, hidden reasoning, or non-`mm` tool calls unless those systems pass context in separately.
+
+Redaction is on by default for text-heavy flags and positional note payloads. Use `--include-sensitive` or `--redaction none` only in a trusted local workspace.
+
 ## Search, read, and context
 
 ```bash

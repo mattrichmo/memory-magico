@@ -46,6 +46,7 @@ For agent-heavy work this matters more, not less. Agents can write useful memory
 | Relationships | Typed graph edges between issues, tasks, wiki pages, raw items, files, commits, and other entities. |
 | Generated indexes | Search, page, chunk, and dashboard artifacts derived from canonical memory — rebuildable, disposable. |
 | Agent roles | Source-controlled instructions installed into Claude Code or Codex-style agent surfaces. |
+| Trace logs | Optional append-only records of observed `mm` command activity for debugging agent workflows and inferred local sessions. |
 | Git history | The audit trail for every memory mutation, including agent edits, decisions, evidence, and rollbacks. |
 
 The agent-facing rules are short: raw sources are immutable, wiki pages are canonical, generated indexes are disposable, agents resolve before they mutate, and verification evidence is required before anything is marked done.
@@ -83,6 +84,20 @@ templates/         bundled default agent role definitions
 ```
 
 Full repository layout, path resolution (`toolRoot`/`repoRoot`/`memoryRoot`), and dev setup live in [CONTRIBUTING.md](CONTRIBUTING.md).
+
+### Optional trace logging
+
+MemoryMagico can trace observable CLI activity without depending on a Codex or Claude chat session identifier:
+
+```bash
+mm trace on --verbose
+mm trace mark "security audit cleanup"
+mm trace sessions
+mm trace show trace_...
+mm trace off
+```
+
+The log lives under `memory/.mm/trace/events/*.jsonl`. Sessions are inferred from workspace, cwd, host, user, and idle timeout; upstream agent labels can be attached with `mm trace context set --agent codex --label "..."`. Trace data is evidence for debugging and later promotion, not canonical project truth by itself.
 
 ---
 
@@ -228,7 +243,7 @@ Raw intake is immutable: source material is captured before interpretation and i
 - Stricter JSONL parsing in lint paths.
 - Uniform path containment checks at every command boundary.
 - Prompt-injection rules in every generated agent surface.
-- Append-only mutation log for every state transition.
+- Promote useful trace sessions into raw/work evidence.
 - Optional SQLite backend for high-concurrency agent runs.
 - Shell completions generated from the command registry.
 

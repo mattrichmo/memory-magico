@@ -7,6 +7,7 @@ import { withLock } from '../core/lock.mjs';
 import { indexStatus, rebuildIndex } from '../core/retrieval.mjs';
 import { workspace } from '../core/paths.mjs';
 import { actionSuggestionHint, resolveSubcommandContract } from '../core/subcommand-registry.mjs';
+import { appendCommandTrace } from '../core/trace.mjs';
 
 const WORKSPACE_WRITE_COMMANDS = new Set([
   'add',
@@ -42,12 +43,39 @@ const WORKSPACE_OPTIONAL_COMMANDS = new Set([
   'schema',
 ]);
 
+function normalizeContractArgv(command, argv) {
+  if (command?.name !== 'trace' || argv[0] !== 'logging') return argv;
+  const sub = argv[1] || 'status';
+  if (sub === 'yes' || sub === 'on' || sub === 'enable') return ['trace', 'on', ...argv.slice(2)];
+  if (sub === 'no' || sub === 'off' || sub === 'disable') return ['trace', 'off', ...argv.slice(2)];
+  return ['trace', sub, ...argv.slice(2)];
+}
+
 export async function run(argv) {
   const cmd = argv[0] || 'help';
   const wantsJson = argv.includes('--json');
   const command = getCommand(cmd);
-  const jsonSubcommandContract = command ? resolveSubcommandContract(command.name, argv) : null;
+  const contractArgv = normalizeContractArgv(command, argv);
+  const jsonSubcommandContract = command ? resolveSubcommandContract(command.name, contractArgv) : null;
   const handler = command ? COMMAND_HANDLERS[command.name] : null;
+  const startedAt = new Date().toISOString();
+  const startedAtMs = Date.now();
+  let traceLogged = false;
+  const logTrace = async ({ result = null, error = null } = {}) => {
+    if (traceLogged) return;
+    traceLogged = true;
+    await appendCommandTrace({
+      argv,
+      command,
+      contract: jsonSubcommandContract,
+      startedAt,
+      endedAt: new Date().toISOString(),
+      durationMs: Date.now() - startedAtMs,
+      exitCode: error?.exitCode ?? process.exitCode ?? 0,
+      error,
+      result,
+    });
+  };
   const exec = async () => {
     if (!command || !handler) {
       const suggestion = actionSuggestionHint(cmd);
@@ -71,12 +99,16 @@ export async function run(argv) {
     const lockScope = subcommandContract
       ? subcommandContract.lockScope
       : WORKSPACE_WRITE_COMMANDS.has(command.name) ? 'repo-write' : null;
+    let result;
     if (lockScope) {
-      return withLock(lockScope, () => handler(argv), {
+      result = await withLock(lockScope, () => handler(argv), {
         command: `mm ${argv.join(' ')}`,
       });
+    } else {
+      result = await handler(argv);
     }
-    return handler(argv);
+    await logTrace({ result });
+    return result;
   };
 
   try {
@@ -102,6 +134,7 @@ export async function run(argv) {
       console.error(mmErr.message);
       if (mmErr.hint) console.error(mmErr.hint);
     }
+    await logTrace({ error: mmErr });
     process.exitCode = mmErr.exitCode ?? 2;
     return null;
   }

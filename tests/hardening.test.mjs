@@ -3,6 +3,7 @@ import test from 'node:test';
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
+import os from 'node:os';
 import path from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { Readable } from 'node:stream';
@@ -22,6 +23,7 @@ import { mirrorRecordToMarkdown } from '../src/core/work-pages.mjs';
 import { handleApi, serveStatic } from '../src/commands/dashboard.mjs';
 import { importLegacyEntityRecords } from '../src/core/migrations.mjs';
 import { validateRoleContract } from '../src/core/role-contracts.mjs';
+import { redactArgv } from '../src/core/trace.mjs';
 
 const repoRoot = path.dirname(fileURLToPath(new URL('../package.json', import.meta.url)));
 
@@ -94,6 +96,69 @@ test('subcommand contracts cover core workflow and lock semantics', () => {
   assert.equal(resolveSubcommandContract('doctor', ['doctor', '--fix']).lockScope, 'repo-write');
   assert.ok(toolsForRoleTags(['work.issue.create']).includes('mm issue create'));
   assert.ok(toolsForRoleTags(['work.sprint.compose']).includes('mm sprint compose'));
+});
+
+test('trace redaction hides text-heavy payloads by default', () => {
+  assert.deepEqual(
+    redactArgv(['raw', 'add', '--text', 'secret payload'], { commandName: 'raw', action: 'add' }),
+    ['raw', 'add', '--text', '[redacted]'],
+  );
+  assert.deepEqual(
+    redactArgv(['comment', 'add', 'issue_abc123_def456', 'private review note'], { commandName: 'comment', action: 'add' }),
+    ['comment', 'add', 'issue_abc123_def456', '[redacted]'],
+  );
+  assert.deepEqual(
+    redactArgv(['raw', 'add', '--text=secret payload'], { commandName: 'raw', action: 'add' }),
+    ['raw', 'add', '--text=[redacted]'],
+  );
+});
+
+test('trace command records inferred sessions in an isolated workspace', async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'mm-trace-'));
+  const tempMemoryRoot = path.join(tmp, 'memory');
+  await fs.mkdir(path.join(tempMemoryRoot, '.mm'), { recursive: true });
+  await fs.writeFile(path.join(tempMemoryRoot, '.mm', 'manifest.json'), JSON.stringify({
+    schemaVersion: 1,
+    workspaceId: 'mem_trace_test',
+    name: 'trace-test',
+  }, null, 2) + '\n', 'utf8');
+  const env = { ...process.env, MEMORYMAGICO_MEMORY_ROOT: tempMemoryRoot };
+  try {
+    const enable = spawnSync('node', ['./bin/mm.mjs', 'logging', 'yes', '--verbose', '--label', 'trace test', '--json'], {
+      cwd: repoRoot,
+      env,
+      encoding: 'utf8',
+    });
+    assert.equal(enable.status, 0, enable.stderr);
+    assert.equal(JSON.parse(enable.stdout).config.enabled, true);
+
+    const command = spawnSync('node', ['./bin/mm.mjs', 'raw', 'add', '--text', 'secret trace payload', '--json'], {
+      cwd: repoRoot,
+      env,
+      encoding: 'utf8',
+    });
+    assert.equal(command.status, 0, command.stderr);
+
+    const sessions = spawnSync('node', ['./bin/mm.mjs', 'trace', 'sessions', '--json'], {
+      cwd: repoRoot,
+      env,
+      encoding: 'utf8',
+    });
+    assert.equal(sessions.status, 0, sessions.stderr);
+    const payload = JSON.parse(sessions.stdout);
+    assert.equal(payload.ok, true);
+    assert.ok(payload.sessions.length >= 1);
+    assert.ok(payload.sessions[0].commandCount >= 1);
+
+    const eventText = await fs.readFile(path.join(tempMemoryRoot, '.mm', 'trace', 'events', `${new Date().toISOString().slice(0, 10)}.jsonl`), 'utf8');
+    assert.match(eventText, /"event":"command\.end"/);
+    assert.match(eventText, /"sessionId":"trace_/);
+    assert.match(eventText, /"commandName":"raw"/);
+    assert.doesNotMatch(eventText, /secret trace payload/);
+    assert.match(eventText, /\[redacted\]/);
+  } finally {
+    await fs.rm(tmp, { recursive: true, force: true });
+  }
 });
 
 test('role contracts reject legacy qm command tools', () => {

@@ -35,6 +35,8 @@ export const canonicalDirs = [
   'graph',
   'build-log',
   'generated',
+  path.join('.mm', 'trace'),
+  path.join('.mm', 'trace', 'events'),
   path.join('.mm', 'search'),
 ];
 
