@@ -38,6 +38,7 @@ export const canonicalDirs = [
   path.join('.mm', 'trace'),
   path.join('.mm', 'trace', 'events'),
   path.join('.mm', 'search'),
+  path.join('.mm', 'search', 'postings'),
 ];
 
 function makeWorkspaceId() {

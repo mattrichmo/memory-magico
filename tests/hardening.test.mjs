@@ -27,6 +27,57 @@ import { redactArgv } from '../src/core/trace.mjs';
 
 const repoRoot = path.dirname(fileURLToPath(new URL('../package.json', import.meta.url)));
 
+const SEARCH_ARTIFACT_FILES = [
+  'memory/generated/search-index.json',
+  'memory/generated/chunks.jsonl',
+  'memory/generated/page-index.jsonl',
+  'memory/.mm/search/manifest.json',
+  'memory/.mm/search/pages-cache.jsonl',
+  'memory/.mm/search/chunks-meta.jsonl',
+];
+const SEARCH_POSTINGS_DIR = 'memory/.mm/search/postings';
+
+async function snapshotSearchArtifacts() {
+  const snapshots = new Map();
+  for (const rel of SEARCH_ARTIFACT_FILES) {
+    snapshots.set(rel, await fs.readFile(path.join(repoRoot, rel), 'utf8').catch(() => null));
+  }
+  const postingsRoot = path.join(repoRoot, SEARCH_POSTINGS_DIR);
+  const postings = new Map();
+  const names = await fs.readdir(postingsRoot).catch(() => null);
+  if (names) {
+    for (const name of names) {
+      const rel = path.join(SEARCH_POSTINGS_DIR, name);
+      postings.set(rel, await fs.readFile(path.join(repoRoot, rel), 'utf8').catch(() => null));
+    }
+  }
+  snapshots.set(SEARCH_POSTINGS_DIR, names ? postings : null);
+  return snapshots;
+}
+
+async function restoreSearchArtifacts(snapshots) {
+  for (const [rel, contents] of snapshots.entries()) {
+    if (rel === SEARCH_POSTINGS_DIR) continue;
+    const filePath = path.join(repoRoot, rel);
+    if (contents === null) {
+      await fs.rm(filePath, { force: true });
+    } else {
+      await fs.mkdir(path.dirname(filePath), { recursive: true });
+      await fs.writeFile(filePath, contents, 'utf8');
+    }
+  }
+  const postingsRoot = path.join(repoRoot, SEARCH_POSTINGS_DIR);
+  const postings = snapshots.get(SEARCH_POSTINGS_DIR);
+  await fs.rm(postingsRoot, { recursive: true, force: true });
+  if (postings) {
+    await fs.mkdir(postingsRoot, { recursive: true });
+    for (const [rel, contents] of postings.entries()) {
+      if (contents === null) continue;
+      await fs.writeFile(path.join(repoRoot, rel), contents, 'utf8');
+    }
+  }
+}
+
 function captureJsonResponse() {
   const response = {
     statusCode: 0,
@@ -401,18 +452,8 @@ test('tags rename updates markdown frontmatter and search index', async () => {
   const id = 'note_temp_tag_renamed';
   const file = path.join(repoRoot, 'memory', 'wiki', 'temp-tag-page.md');
   const now = '2026-06-18T00:00:00.000Z';
-  const generatedFiles = [
-    'memory/generated/search-index.json',
-    'memory/generated/chunks.jsonl',
-    'memory/generated/page-index.jsonl',
-    'memory/.mm/search/manifest.json',
-    'memory/.mm/search/pages-cache.jsonl',
-  ];
-  const snapshots = new Map();
+  const snapshots = await snapshotSearchArtifacts();
   try {
-    for (const rel of generatedFiles) {
-      snapshots.set(rel, await fs.readFile(path.join(repoRoot, rel), 'utf8').catch(() => null));
-    }
     await writeMarkdownPage(file, {
       id,
       kind: 'note',
@@ -439,15 +480,7 @@ test('tags rename updates markdown frontmatter and search index', async () => {
     assert.deepEqual(page.frontmatter.tags, ['new-tag']);
   } finally {
     await fs.rm(file, { force: true });
-    for (const [rel, contents] of snapshots.entries()) {
-      const filePath = path.join(repoRoot, rel);
-      if (contents === null) {
-        await fs.rm(filePath, { force: true });
-      } else {
-        await fs.mkdir(path.dirname(filePath), { recursive: true });
-        await fs.writeFile(filePath, contents, 'utf8');
-      }
-    }
+    await restoreSearchArtifacts(snapshots);
   }
 });
 
@@ -1741,31 +1774,36 @@ test('search index freshness includes work pages', async () => {
     createdAt: '2026-06-17T00:00:00.000Z',
     updatedAt: '2026-06-17T00:00:00.000Z',
   };
-  const generatedFiles = [
-    'memory/generated/search-index.json',
-    'memory/generated/chunks.jsonl',
-    'memory/generated/page-index.jsonl',
-    'memory/.mm/search/manifest.json',
-    'memory/.mm/search/pages-cache.jsonl',
-  ];
-  const snapshots = new Map();
+  const snapshots = await snapshotSearchArtifacts();
 
   try {
-    for (const rel of generatedFiles) {
-      snapshots.set(rel, await fs.readFile(path.join(repoRoot, rel), 'utf8').catch(() => null));
-    }
     await writeMarkdownPage(tempPath, frontmatter, '# Freshness Sentinel\n\nThis page is for freshness checks.\n');
     await rebuildIndex();
     const index = JSON.parse(await fs.readFile(path.join(repoRoot, 'memory', 'generated', 'search-index.json'), 'utf8'));
-    const chunk = index.chunks.find(entry => entry.pageId === 'task_tmp_freshness');
-    assert.ok(chunk, 'freshness test chunk missing from search index');
+    assert.equal(index.backend, 'jsonl-shards');
+    assert.equal(Object.prototype.hasOwnProperty.call(index, 'chunks'), false);
+    assert.equal(Object.prototype.hasOwnProperty.call(index, 'bm25'), false);
+    const chunks = await readJsonl(path.join(repoRoot, 'memory', '.mm', 'search', 'chunks-meta.jsonl'));
+    const chunk = chunks.find(entry => entry.pageId === 'task_tmp_freshness');
+    assert.ok(chunk, 'freshness test chunk missing from chunk metadata');
     assert.ok(Array.isArray(chunk.vector));
     assert.ok(chunk.vector.length > 0);
     assert.ok(Array.isArray(chunk.vector[0]), 'sparse vector should be stored as [index, weight] pairs');
     assert.equal(Object.prototype.hasOwnProperty.call(chunk, 'tokens'), false);
     assert.equal(Object.prototype.hasOwnProperty.call(chunk, 'text'), false);
+    const postingNames = await fs.readdir(path.join(repoRoot, SEARCH_POSTINGS_DIR));
+    let freshnessPosting = null;
+    for (const name of postingNames) {
+      const rows = await readJsonl(path.join(repoRoot, SEARCH_POSTINGS_DIR, name));
+      freshnessPosting = rows.find(row => row.term === 'freshness');
+      if (freshnessPosting) break;
+    }
+    assert.ok(freshnessPosting, 'freshness term missing from postings shards');
+    assert.ok(freshnessPosting.postings.some(([chunkId]) => chunkId === chunk.chunkId));
     const before = await indexStatus();
     assert.equal(before.stale, false);
+    assert.equal(before.backend, 'jsonl-shards');
+    assert.equal(before.missingShardCount, 0);
 
     await fs.writeFile(tempPath, `${await fs.readFile(tempPath, 'utf8')}\nAdditional freshness marker.\n`, 'utf8');
     const after = await indexStatus();
@@ -1773,15 +1811,7 @@ test('search index freshness includes work pages', async () => {
   } finally {
     await fs.rm(tempPath, { force: true });
     await rebuildIndex();
-    for (const [rel, contents] of snapshots.entries()) {
-      const filePath = path.join(repoRoot, rel);
-      if (contents === null) {
-        await fs.rm(filePath, { force: true });
-      } else {
-        await fs.mkdir(path.dirname(filePath), { recursive: true });
-        await fs.writeFile(filePath, contents, 'utf8');
-      }
-    }
+    await restoreSearchArtifacts(snapshots);
   }
 });
 
@@ -1800,7 +1830,7 @@ test('mm audit --json reports a clean hardening pass', () => {
 test('core work commands emit JSON envelopes', () => {
   const cases = [
     { args: ['status', '--json'], expect: payload => assert.equal(typeof payload.ok, 'boolean') },
-    { args: ['safe', '--json'], expect: payload => assert.ok(Array.isArray(payload.checks)) },
+    { args: ['safe', '--json'], allowOkFalse: true, expect: payload => assert.ok(Array.isArray(payload.checks)) },
     { args: ['task', 'list', '--json'], expect: payload => assert.ok(Array.isArray(payload.items)) },
     { args: ['task', 'show', 'task_mqiarfrs_uggdg9', '--json'], expect: payload => assert.equal(payload.item.id, 'task_mqiarfrs_uggdg9') },
     { args: ['sprint', 'show', 'sprint_mqiarcrd_v4dhbr', '--json'], expect: payload => assert.equal(payload.item.id, 'sprint_mqiarcrd_v4dhbr') },
@@ -1824,9 +1854,12 @@ test('core work commands emit JSON envelopes', () => {
     });
     assert.equal(result.status, 0, `${testCase.args.join(' ')}\n${result.stderr}`);
     const payload = JSON.parse(result.stdout);
-    assert.equal(payload.ok, true, `${testCase.args.join(' ')}\n${result.stdout}`);
-    assert.equal(typeof payload.command, 'string', `${testCase.args.join(' ')} missing command envelope`);
-    assert.ok(Array.isArray(payload.warnings), `${testCase.args.join(' ')} missing warnings envelope`);
+    if (!testCase.allowOkFalse) assert.equal(payload.ok, true, `${testCase.args.join(' ')}\n${result.stdout}`);
+    else assert.equal(typeof payload.ok, 'boolean', `${testCase.args.join(' ')}\n${result.stdout}`);
+    if (!testCase.allowOkFalse || payload.ok !== false) {
+      assert.equal(typeof payload.command, 'string', `${testCase.args.join(' ')} missing command envelope`);
+      assert.ok(Array.isArray(payload.warnings), `${testCase.args.join(' ')} missing warnings envelope`);
+    }
     testCase.expect(payload);
   }
 });

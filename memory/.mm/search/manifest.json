@@ -1,73 +1,79 @@
 {
-  "version": 2,
-  "builtAt": "2026-06-18T16:26:09.424Z",
+  "version": 3,
+  "builtAt": "2026-06-25T16:27:00.459Z",
+  "backend": "jsonl-shards",
   "mode": "hybrid",
   "vectorDims": 2048,
-  "pageCount": 9,
-  "chunkCount": 37,
+  "pageCount": 8,
+  "chunkCount": 35,
+  "docCount": 35,
+  "shardCount": 64,
   "sourceRoots": [
     "wiki",
     "work"
   ],
+  "artifacts": {
+    "index": "generated/search-index.json",
+    "pages": "generated/page-index.jsonl",
+    "chunks": "generated/chunks.jsonl",
+    "chunkMeta": ".mm/search/chunks-meta.jsonl",
+    "postings": ".mm/search/postings"
+  },
   "roots": {
     "wiki": {
       "root": "wiki",
       "files": [
         {
           "path": "wiki/concepts/sentinel-1-radar-monitoring.md",
-          "mtimeMs": 1781714099955.5671,
+          "mtimeMs": 1782404612666.3872,
           "size": 312
         },
         {
           "path": "wiki/index.md",
-          "mtimeMs": 1781714017148.287,
+          "mtimeMs": 1782404612666.4333,
           "size": 148
         },
         {
           "path": "wiki/log.md",
-          "mtimeMs": 1781714099955.9912,
+          "mtimeMs": 1782404612666.5415,
           "size": 248
         },
         {
           "path": "wiki/open-questions.md",
-          "mtimeMs": 1781714017149.0488,
+          "mtimeMs": 1782404612666.5955,
           "size": 45
         },
         {
           "path": "wiki/overview.md",
-          "mtimeMs": 1781714017148.7449,
+          "mtimeMs": 1782404612666.6462,
           "size": 49
-        },
-        {
-          "path": "wiki/temp-tag-page.md",
-          "mtimeMs": 1781799969394.321,
-          "size": 257
         }
       ],
-      "pageCount": 6,
-      "chunkCount": 28
+      "pageCount": 5,
+      "chunkCount": 26
     },
     "work": {
       "root": "work",
       "files": [
         {
           "path": "work/initiatives/smoke-work.md",
-          "mtimeMs": 1781795761119.2764,
+          "mtimeMs": 1782404612666.7698,
           "size": 614
         },
         {
           "path": "work/sprints/smoke-sprint.md",
-          "mtimeMs": 1781795761120.7944,
+          "mtimeMs": 1782404612666.8586,
           "size": 642
         },
         {
           "path": "work/tasks/smoke-task.md",
-          "mtimeMs": 1781795761122.1526,
+          "mtimeMs": 1782404612666.9414,
           "size": 620
         }
       ],
       "pageCount": 3,
       "chunkCount": 9
     }
-  }
+  },
+  "avgDocLength": 16.8
 }

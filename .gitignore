@@ -11,4 +11,6 @@ coverage
 
 memory/.mm/locks/
 memory/.mm/search/pages-cache.jsonl
+memory/.mm/search/chunks-meta.jsonl
+memory/.mm/search/postings/
 memory/work/*/index.jsonl

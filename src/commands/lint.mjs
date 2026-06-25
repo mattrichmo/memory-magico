@@ -329,12 +329,17 @@ async function lintUnicode(errors, warnings) {
 }
 
 async function lintJsonl(errors, warnings) {
-  for (const rel of [
+  const jsonlFiles = [
     'inbox/raw-items.jsonl',
     'issues/relationships.jsonl',
     'generated/page-index.jsonl',
     'generated/chunks.jsonl',
-  ]) {
+    '.mm/search/chunks-meta.jsonl',
+  ];
+  for (let shard = 0; shard < 64; shard += 1) {
+    jsonlFiles.push(`.mm/search/postings/${String(shard).padStart(2, '0')}.jsonl`);
+  }
+  for (const rel of jsonlFiles) {
     try {
       const rows = await readJsonl(path.join(memoryRoot, rel), { mode: 'strict' });
       if (!Array.isArray(rows)) errors.push(`${rel}: could not parse JSONL`);
@@ -344,13 +349,16 @@ async function lintJsonl(errors, warnings) {
   }
 }
 
-function validateGeneratedShape(errors, rel, data, requiredKeys = []) {
+function validateGeneratedShape(errors, rel, data, requiredKeys = [], expected = {}) {
   if (!data || typeof data !== 'object' || Array.isArray(data)) {
     errors.push(`${rel}: expected JSON object`);
     return;
   }
   for (const key of requiredKeys) {
     if (!(key in data)) errors.push(`${rel}: missing ${key}`);
+  }
+  for (const [key, value] of Object.entries(expected)) {
+    if (data[key] !== value) errors.push(`${rel}: expected ${key}=${value}`);
   }
 }
 
@@ -364,12 +372,14 @@ async function lintGeneratedArtifacts(errors) {
     {
       rel: 'generated/search-index.json',
       kind: 'json',
-      requiredKeys: ['builtAt', 'pages', 'chunks', 'bm25'],
+      requiredKeys: ['builtAt', 'backend', 'pageCount', 'chunkCount', 'shardCount', 'artifacts'],
+      expected: { backend: 'jsonl-shards' },
     },
     {
       rel: '.mm/search/manifest.json',
       kind: 'json',
-      requiredKeys: ['builtAt', 'mode', 'pageCount', 'chunkCount', 'vectorDims'],
+      requiredKeys: ['builtAt', 'backend', 'mode', 'pageCount', 'chunkCount', 'vectorDims', 'docCount', 'avgDocLength', 'artifacts'],
+      expected: { backend: 'jsonl-shards' },
     },
   ];
 
@@ -377,7 +387,7 @@ async function lintGeneratedArtifacts(errors) {
     const fullPath = path.join(memoryRoot, file.rel);
     try {
       const data = await readJsonFile(fullPath);
-      validateGeneratedShape(errors, file.rel, data, file.requiredKeys);
+      validateGeneratedShape(errors, file.rel, data, file.requiredKeys, file.expected || {});
     } catch (err) {
       errors.push(`${file.rel}: ${err.message}`);
     }

@@ -58,9 +58,13 @@ Redaction is on by default for text-heavy flags and positional note payloads. Us
 ```bash
 mm index rebuild [--json]
 mm index status [--json]
+mm index stats [--json]
+mm index terms <term> [--limit N] [--json]
+mm index chunks --page <page-id-or-path> [--json]
+mm index explain <query> [--kind <kind>] [--path <prefix>] [--since 30d|date] [--json]
 mm index show
 
-mm search <query> [--kind <kind>] [--limit N] [--mode lexical|vector|hybrid] [--json] [--explain]
+mm search <query> [--kind <kind>] [--path <prefix>] [--since 30d|date] [--limit N] [--mode lexical|vector|hybrid] [--json] [--explain]
 mm resolve <query> [--kind <kind>] [--limit N] [--json]
 mm context <id-or-query> [--deep] [--json]
 mm read <path> [--offset N] [--lines N] [--max-bytes N] [--json] [--binary-info]
@@ -72,8 +76,8 @@ mm results prune --all --yes
 
 | Command | Description |
 |---|---|
-| `mm index` | Rebuilds or inspects the local search index. |
-| `mm search` | Searches memory pages and work records using the generated index. |
+| `mm index` | Rebuilds or inspects the compact local search store: page/chunk JSONL, hidden postings shards, and a small manifest. |
+| `mm search` | Searches memory pages and work records using the generated search store, with kind/path/recency filters for surgical exploration. |
 | `mm resolve` | Resolves human references, titles, aliases, or IDs to memory entities. |
 | `mm context` | Returns focused context for a target entity or query. |
 | `mm read` | Reads bounded file ranges with line and byte caps. |

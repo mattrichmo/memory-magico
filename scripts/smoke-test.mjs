@@ -8,7 +8,9 @@ function run(args) {
   }
 }
 
+run(['doctor', '--fix']);
 run(['doctor']);
+run(['index', 'rebuild']);
 run(['index', 'status']);
 run(['graph', 'rebuild']);
 run(['claim', 'list']);

@@ -51,6 +51,8 @@ For agent-heavy work this matters more, not less. Agents can write useful memory
 
 The agent-facing rules are short: raw sources are immutable, wiki pages are canonical, generated indexes are disposable, agents resolve before they mutate, and verification evidence is required before anything is marked done.
 
+Search uses a compact local store instead of one large JSON runtime index: `memory/generated/page-index.jsonl` and `memory/generated/chunks.jsonl` stay inspectable, while runtime postings and chunk metadata live under `memory/.mm/search/`. `memory/generated/search-index.json` is only a small backend pointer/manifest, not the operational search database.
+
 ---
 
 ## Architecture
